@@ -1,0 +1,15 @@
+/* Bundled so the desktop app looks the same offline on every machine. Licences: src/assets/fonts/LICENSE-FONTS.txt */
+@font-face {
+  font-family: 'Jost';
+  font-style: normal;
+  font-weight: 300 600;
+  font-display: swap;
+  src: url('../assets/fonts/jost-latin-var.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 300 500;
+  font-display: swap;
+  src: url('../assets/fonts/jetbrains-mono-latin-var.woff2') format('woff2');
+}

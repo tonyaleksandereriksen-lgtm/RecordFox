@@ -1,0 +1,18 @@
+{
+  "at": "2026-09-12T02:06:53.642Z",
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+  "device": {
+    "label": "Line (2- DDJ-FLX2) (2b73:004d)",
+    "isFlx2": true
+  },
+  "sinkSupported": true,
+  "maxChannelCount": 4,
+  "latency": [
+    { "hint": "interactive", "sampleRate": 44100, "baseLatencyMs": 10, "outputLatencyMs": 42 },
+    { "hint": "balanced", "sampleRate": 44100, "baseLatencyMs": 10, "outputLatencyMs": 42 },
+    { "hint": "0.005", "sampleRate": 44100, "baseLatencyMs": 10, "outputLatencyMs": 43 }
+  ],
+  "channelTest": { "master": "skipped", "phones": "skipped" },
+  "midiToSound": { "presses": 0, "avgHandlingMs": null, "estimatedTotalMs": null },
+  "verdict": "Output latency 52 ms — too slow for scratching; plan a native audio engine. 4 output channels — master and phones can be split."
+}

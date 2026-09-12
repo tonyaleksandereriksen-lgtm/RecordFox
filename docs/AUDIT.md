@@ -57,7 +57,7 @@ M2 SYNC long-press · M4 small labels (9–10 px remain for uppercase labels) ·
 
 ## Status — 0.3.0 (2026-09-12)
 Fixed: **C1** (the native engine plays both decks through the FLX2 — WASAPI exclusive, 48 kHz, 4 ch, 4.00 ms; the audio
-thread is the clock; `docs/m1-check-2026-09-12.json` has the measurements) · **H6** (git, pushed to
+thread is the clock; `docs/m1-check-2026-09-13-600s.json` has the measurements) · **H6** (git, pushed to
 github.com/tonyaleksandereriksen-lgtm/RecordFox) · **H5** (answered: 52 ms in the browser, 4 ms native — went native) ·
 M6's "output loss undetected" now also covers audio: a frozen device callback is detected within 1.5 s and the output reopened once.
 Open: C4 hardware session (M3) · M2 SYNC long-press · M4 small labels · M9 UI tests in repo (the M1 check script drives the real app; the

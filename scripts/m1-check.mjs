@@ -23,6 +23,11 @@ const opt = (name, dflt) => {
 };
 const SECONDS = Number(opt('seconds', 60));
 const SHOT = opt('shot', null);
+/** Local date, the way the docs are dated (the report's `at` stays ISO/UTC). */
+const localDate = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 // The track must outlast the run: the engine stops a deck at the end of its track (by design).
 const TRACK_SECONDS = SECONDS + 90;
 const WAV = path.resolve(opt('wav', path.join(root, 'native', 'target', `rekordfox-test-120bpm-${TRACK_SECONDS}s.wav`)));
@@ -191,7 +196,7 @@ check('playhead follows the engine (no drift)', clock.playing && !clockError && 
 });
 if (appClosed) {
   const report = { at: new Date().toISOString(), seconds: SECONDS, status, results, cutShort: true };
-  writeFileSync(path.join(root, 'docs', `m1-check-${report.at.slice(0, 10)}.json`), JSON.stringify(report, null, 2));
+  writeFileSync(path.join(root, 'docs', `m1-check-${localDate()}-${SECONDS}s.json`), JSON.stringify(report, null, 2));
   console.log('the app window was closed before the run finished — partial report written');
   process.exit(1);
 }
@@ -302,7 +307,7 @@ await inPage(`
 `);
 
 const report = { at: new Date().toISOString(), seconds: SECONDS, status, results };
-const file = path.join(root, 'docs', `m1-check-${report.at.slice(0, 10)}.json`);
+const file = path.join(root, 'docs', `m1-check-${localDate()}-${SECONDS}s.json`);
 writeFileSync(file, JSON.stringify(report, null, 2));
 console.log(`\nreport: ${path.relative(root, file)}`);
 

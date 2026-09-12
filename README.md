@@ -22,7 +22,7 @@ on Windows a MIDI port can only be open in one app.
 | Browser | double-click **`start.bat`** — rebuilds (when the dev tools are installed), serves `dist/` and opens Chrome/Edge as an app window. Click **Connect FLX2** and allow MIDI. If port 5199 is busy it reuses a running RekordFox or picks the next port. |
 | Desktop app (Electron) | double-click **`start-desktop.bat`** — installs once, builds the audio engine once (needs Rust + the MSVC build tools, see `native/README.md`), rebuilds, opens the desktop window. MIDI connects automatically (SysEx allowed); audio opens the FLX2 in exclusive mode, so close rekordbox / Serato first. **Audio is desktop-only** — the browser build has no engine. |
 | Develop | **`dev.bat`** or `npm run dev` (Vite, hot reload); `npm run app:dev` (Electron + Vite). |
-| Tests | `npm run check` — type-check, 124 node tests (decoder, Web MIDI port handling, soft takeover, engine, engine clock, bridge, LED echo, library, persistence, export) and 126 native checks (DSP, device shim, engine, analysis). |
+| Tests | `npm run check` — type-check, 125 node tests (decoder, Web MIDI port handling, soft takeover, engine, engine clock, bridge, LED echo, library, persistence, export) and 128 native checks (DSP, device shim, engine, analysis). |
 | Hardware check | `node scripts/m1-check.mjs --seconds 600` — drives the built desktop app on the FLX2 for ten minutes and reports drift, transport following, meters and underruns. |
 
 ## Screens

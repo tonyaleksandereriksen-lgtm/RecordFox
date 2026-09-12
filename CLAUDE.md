@@ -59,7 +59,7 @@ process only; the renderer never loads native code.
 - Long lists (MIDI monitor) are throttled (~10 fps) and virtualised — never render 600 rows.
 
 ## Commands
-`npm run check` (typecheck + 124 node tests + 126 native checks) · `npm test` · `npm run typecheck` · `npm run dev` ·
+`npm run check` (typecheck + 125 node tests + 128 native checks) · `npm test` · `npm run typecheck` · `npm run dev` ·
 `npm run build` · `npm run native` (builds the addon → `native/node/rfx.node`) · `npm run native:smoke` (loads it in
 Electron, opens the output for 0.5 s) · `node scripts/m1-check.mjs [--seconds N]` (drives the built desktop app on the
 FLX2 and measures drift, transport following, meters, underruns → `docs/m1-check-<date>.json`) · `npm run app` ·
@@ -94,7 +94,7 @@ useless for scratching, and Chromium cannot reach WASAPI exclusive from any proc
 ## Open issues
 `docs/NEXT.md` is the working backlog (milestones with acceptance criteria, written for a Claude Code session
 running in this folder). `docs/AUDIT.md` — see the "Status — 0.2.0" section at the end for what's fixed and what's left.
-Done: M1 (the app plays audio through the FLX2 — `docs/m1-check-2026-09-12.json`). Next: M2 — folders, tags and the
+Done: M1 (the app plays audio through the FLX2 — `docs/m1-check-2026-09-13-600s.json`). Next: M2 — folders, tags and the
 analyser that already works, called from the addon; then M3 on the hardware; then Audius.
 
 ## Open items to verify on hardware

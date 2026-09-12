@@ -40,12 +40,41 @@ cannot be met as written.
   from RAM, channel strips, crossfader, pre-fader cue, master on ch 1/2 and headphones on ch 3/4).
   Measured on the FLX2: WASAPI **exclusive at 48 kHz, 4 ch, 2 x 96 frames = 4.00 ms**, callback every
   2 ms, zero underruns through the whole demo. `native/audio-native-check.json` has the raw numbers.
-- **Not connected yet**: the UI and the engine do not talk to each other. The on-screen decks still run
-  on a requestAnimationFrame clock with generated demo waveforms. That is M1.
+- **Connected (0.3.0, 2026-09-12)**: the engine runs in Electron's main process behind a Node-API addon
+  (`native/node/`), the renderer mirrors state into it through `src/audio/engineBridge.ts`, and the
+  engine's playheads are the clock for every deck it holds. Demo tracks (no audio) and the browser build
+  still run on the animation-frame clock. Local wav/flac/mp3 files can be added in the Library (title from
+  the file name, duration from the headers; BPM, key and the waveform wait for M2's analysis).
 
-## M1 — Make the app play audio (the whole point)
+## ~~M1 — Make the app play audio (the whole point)~~ — done 2026-09-12 (0.3.0)
 
-Bridge the engine into Electron and hand it the clock.
+Measured by `node scripts/m1-check.mjs`, which launches the built desktop app, drives it over the DevTools
+protocol and reads the engine back (`docs/m1-check-2026-09-13-600s.json`), FLX2 plugged in:
+
+- Output: **Line (2- DDJ-FLX2), WASAPI exclusive, 48 kHz, 4 ch, 2 × 96 frames = 4.00 ms** (the addon loaded in
+  Electron 37.10.3 with no electron-rebuild — Node-API 10).
+- A 180 s WAV decoded into deck A in 55–60 ms.
+- **Ten minutes of playback (idle machine): 606.4 s of wall time, 606.440 s of audio — drift +1.5 ms,
+  worst momentary deviation 7.8 ms, 0 underruns, 0 stalls.** A run before it: 641.5 s / 641.508 s,
+  drift −2.7 ms. Of five ten-minute runs in all, one done while C code was being compiled alongside
+  ended at −1.1 ms with a 100 ms momentary deviation, and one lost 1.3 s to a stalled exclusive
+  stream — the device stopped delivering callbacks for over 1.5 s, with zero underruns — which is
+  why a stall is now detected in ~0.3 s and the output reopened *in place*: measured mid-playback,
+  reopened in 43 ms, 39 ms of audio lost, deck and position kept.
+- Seek to 30 s: playhead at 30.248 s 250 ms later. A 4-beat loop at 120 BPM held the playhead within
+  30.032–31.976 s of its 30–32 s bounds over 4 s. Tempo slider at +10 % → the engine ran at 1.1005×.
+  CUE while playing paused on the cue point. A 1 s hand scratch (20 ticks every 50 ms through the reducer)
+  landed the engine 6 ms from the hand's position.
+- Channel fader down → deck peak 0.0000 (0.120 up); crossfader hard right → master peak 0.0000 (deck A alone).
+- Browser build: fits 1280×680 / 1366×657 / 1920×1080 with no scrolling, no console errors, footer says
+  "No audio engine", Settings › Audio explains audio needs the desktop app.
+- Not measured here, needs Tony's ears: PLAY-press-to-sound feel (the path is MIDI → reducer → an immediate
+  IPC send → the engine, so ≈ IPC + one 2 ms callback + the 4 ms buffer), headphone CUE on the phones socket
+  (the engine test proves pre-fader cue on channels 3/4 with the master silent; the probe confirmed 3/4 are
+  the phones), and how the jog *feels* — the follower is tuned for reports every 16.7 ms (see
+  `RFX_SCRATCH_*` in `rfx_engine.c`).
+
+How it is put together (kept for the next reader):
 
 1. **Node addon.** Add a napi-rs binding over `native/src/rfx_engine.h` + `rfx_audio.h`. Keep the
    existing `rfx-native` crate and add a `cdylib` target (or a second crate `native/node/`) exposing:
@@ -67,11 +96,16 @@ Bridge the engine into Electron and hand it the clock.
    (Settings › Audio already has the room for it). Fewer than four channels: disable headphone cue with
    an explanation rather than silently mixing it into the master.
 
-**Done when:** a local file loaded on deck A plays through the FLX2; PLAY on the unit starts it with no
-audible lag; the on-screen playhead and waveform track the sound (no drift over ten minutes); the jog
-scratches; the crossfader, EQ, CFX and faders all do what the hardware says; headphone CUE comes out of
-the headphone socket only; `underruns` stays 0 for a ten-minute set; the browser build still loads and
-explains that audio needs the desktop app.
+**Done when:** a local file loaded on deck A plays through the FLX2 ✔; PLAY on the unit starts it with no
+audible lag (path measured, feel to confirm); the on-screen playhead and waveform track the sound (no drift
+over ten minutes ✔); the jog scratches ✔ (feel to confirm); the crossfader, EQ, CFX and faders all do what
+the hardware says (fader and crossfader measured through the meters ✔, EQ/CFX by the DSP suite);
+headphone CUE comes out of the headphone socket only (engine test ✔, ears to confirm); `underruns` stays 0
+for a ten-minute set ✔; the browser build still loads and explains that audio needs the desktop app ✔.
+
+Left open on purpose: the Settings device list is enumerated at start, so a unit plugged in later shows up
+after **Reopen**; a stopped output (unplugged, or taken by another program) is detected within 1.5 s and
+reopened once on whatever is there.
 
 ## M2 — Real tracks
 
@@ -144,17 +178,19 @@ list in CLAUDE.md is empty.
   so scratches, loops and held hot cues return to where the track would have been.
 - **Smart Fader**: fader start is in the reducer behind a preference; the blending (bass swap and tempo
   ride) belongs in the engine.
-- **Meters**: replace the demo levels in `src/ui/mixer/levels.ts` with the engine's real peaks.
+- ~~**Meters**: replace the demo levels in `src/ui/mixer/levels.ts` with the engine's real peaks.~~ Done with M1:
+  `src/audio/meters.ts` carries the engine's post-fader peaks per frame; the demo guess remains for the browser build.
 
 **Done when:** MT holds pitch within a few cents at ±6%; each pad FX is audible and click-free; slip
 returns to the right place after a 4-beat scratch; the meters move with the audio, not with a guess.
 
 ## M5 — Housekeeping worth doing early
 
-- `git init`, `.gitignore` is already there, first commit. Nothing is under version control yet.
+- ~~`git init`, `.gitignore` is already there, first commit.~~ Done 2026-09-12: `main` on
+  github.com/tonyaleksandereriksen-lgtm/RecordFox, `.gitattributes` keeps LF.
 - Delete three stubs left from the redesign: `src/ui/Dock.tsx`, `src/ui/deck/JogDisplay.tsx`,
   `src/ui/waveform/WaveStack.tsx` (each contains only `export {};` and a note).
-- Add `npm run check` = typecheck + tests + `cargo run --release --bin rfx-tests`.
+- ~~Add `npm run check` = typecheck + tests + `cargo run --release --bin rfx-tests`.~~ Done 2026-09-12.
 - Playwright UI tests in the repo (audit M9): the three viewport sizes with no scrolling, load a track,
   needle lock, export naming, MIDI-monitor throughput.
 - Leftovers from docs/AUDIT.md: M4 (a few 9–10 px labels), L3 (canvases do not re-scale on a DPR change),

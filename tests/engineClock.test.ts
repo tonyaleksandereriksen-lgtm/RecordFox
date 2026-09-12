@@ -142,6 +142,22 @@ describe('local tracks', () => {
     assert.equal(again, s, 'nothing new: same state');
   });
 
+  it('library/remove drops local tracks, never demo tracks, and not one that is on a deck', () => {
+    const a = localTrack('local:1', 'C:/a.wav');
+    const b = localTrack('local:2', 'C:/b.wav');
+    let s = run(initialState(), { type: 'library/add', tracks: [a, b] }, { type: 'deck/load', deck: 0, trackId: 'local:1' });
+    const n = s.library.tracks.length;
+    s = run(s, { type: 'library/remove', trackIds: ['local:2', 'demo-1'] });
+    assert.equal(s.library.tracks.length, n - 1, 'local:2 removed, demo-1 kept');
+    assert.ok(s.library.tracks.some((t) => t.id === 'demo-1'));
+    const before = s;
+    s = run(s, { type: 'library/remove', trackIds: ['local:1'] });
+    assert.equal(s.library.tracks.length, before.library.tracks.length, 'a track on a deck stays');
+    assert.ok(s.ui.toast, 'and the DJ is told why');
+    s = run(s, { type: 'deck/eject', deck: 0 }, { type: 'library/remove', trackIds: ['local:1'] });
+    assert.ok(!s.library.tracks.some((t) => t.id === 'local:1'));
+  });
+
   it('an unanalysed track (bpm 0) uses a 120 BPM grid and never follows sync', () => {
     const t = localTrack('local:1', 'C:/a.wav');
     assert.equal(gridBpm(t), UNANALYSED_BPM);

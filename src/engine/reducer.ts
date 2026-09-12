@@ -711,6 +711,17 @@ function reduceAction(s: EngineState, a: EngineAction): EngineState {
       return { ...s, library: { ...s.library, tracks: [...s.library.tracks, ...fresh], selectedId: fresh[0].id } };
     }
 
+    case 'library/remove': {
+      const onDeck = new Set(s.decks.map((d) => d.track?.id).filter((id): id is string => !!id));
+      const gone = new Set(a.trackIds.filter((id) => !onDeck.has(id)));
+      const blocked = a.trackIds.filter((id) => onDeck.has(id));
+      if (blocked.length) return toast(s, 'Eject the track before removing it from the library', 'warn');
+      const tracks = s.library.tracks.filter((t) => !(gone.has(t.id) && t.source === 'local'));
+      if (tracks.length === s.library.tracks.length) return s;
+      const selectedId = s.library.selectedId && gone.has(s.library.selectedId) ? null : s.library.selectedId;
+      return { ...s, library: { ...s.library, tracks, selectedId } };
+    }
+
     case 'library/hydrate': {
       let next = s;
       for (const [id, e] of Object.entries(a.edits)) {

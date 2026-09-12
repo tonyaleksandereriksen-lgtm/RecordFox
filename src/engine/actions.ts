@@ -70,6 +70,8 @@ export type EngineAction =
   | { type: 'library/hydrate'; edits: Record<string, TrackEdits> }
   /** Adds tracks (local files) that are not in the library yet. */
   | { type: 'library/add'; tracks: Track[] }
+  /** Removes local tracks from the library (not the files). A track on a deck stays until ejected. */
+  | { type: 'library/remove'; trackIds: string[] }
   | { type: 'prefs/set'; patch: Partial<Prefs> }
   | { type: 'ui/view'; view: View }
   | { type: 'ui/bottomTab'; tab: BottomTab }

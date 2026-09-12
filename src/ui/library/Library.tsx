@@ -179,6 +179,10 @@ function TrackTable() {
     } else if (e.key === 'Enter' && i >= 0) {
       e.preventDefault();
       loadToFree(rows[i].id);
+    } else if (e.key === 'Delete' && i >= 0 && rows[i].source === 'local') {
+      // Removes the entry only; the file stays on disk. Demo tracks cannot be removed.
+      e.preventDefault();
+      dispatch({ type: 'library/remove', trackIds: [rows[i].id] });
     }
   };
 
@@ -200,7 +204,7 @@ function TrackTable() {
         </span>
         <AddFiles />
       </div>
-      <div className="table" role="grid" aria-label="Tracks" aria-rowcount={rows.length} tabIndex={0} onKeyDown={onKey}>
+      <div className="table" role="grid" aria-label="Tracks" aria-rowcount={rows.length} tabIndex={0} onKeyDown={onKey} title="Enter loads onto a free deck · Delete removes a local file from the library">
         <div className="tr head" role="row">
           <span className="c-num">#</span>
           <span className="c-art">Artwork</span>

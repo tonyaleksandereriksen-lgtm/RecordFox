@@ -135,9 +135,12 @@ if (!status || status.state !== 'running') {
   process.exit(1);
 }
 
-// 2. a local file on deck A
+// 2. a local file on deck A. Earlier runs may have left a test track behind: clear it first so the
+//    deck gets this run's file, not a persisted record pointing at a shorter one.
 const wavJson = JSON.stringify(WAV);
 const loaded = await inPage(`
+  const stale = __m1.state().library.tracks.filter((t) => t.source === 'local' && /^local:m1/.test(t.id)).map((t) => t.id);
+  if (stale.length) __m1.dispatch({ type: 'library/remove', trackIds: stale });
   __m1.dispatch({ type: 'library/add', tracks: [{ id: 'local:m1', title: 'M1 test 120 BPM', artist: 'RekordFox', genre: '', bpm: 120, key: '', durationSec: ${TRACK_SECONDS}, firstBeatSec: 0, hue: 200, seed: 7, source: 'local', path: ${wavJson}, rating: 0, comment: '', playlists: [], addedAt: Date.now() }] });
   __m1.dispatch({ type: 'deck/load', deck: 0, trackId: 'local:m1' });
   const t0 = performance.now();
@@ -270,6 +273,15 @@ const mix = await inPage(`
 check('channel fader gates the deck', mix.up > 0.05 && mix.down < 0.001, { note: `deck peak ${mix.up.toFixed(3)} with the fader up, ${mix.down.toFixed(4)} down` });
 check('crossfader hard right removes deck A from the master', mix.left > 0.02 && mix.right < 0.001, { note: `master peak ${mix.left.toFixed(3)} hard left, ${mix.right.toFixed(4)} hard right` });
 check('no underruns', mix.underruns === 0, { underruns: mix.underruns, note: `${mix.underruns} over the whole run` });
+
+// Leave the library as it was: eject the test track and remove it.
+await inPage(`
+  if (__m1.deck().playing) __m1.dispatch({ type: 'deck/playPause', deck: 0 });
+  __m1.dispatch({ type: 'deck/eject', deck: 0 });
+  __m1.dispatch({ type: 'library/remove', trackIds: ['local:m1'] });
+  await __m1.sleep(600);
+  return true;
+`);
 
 const report = { at: new Date().toISOString(), seconds: SECONDS, status, results };
 const file = path.join(root, 'docs', `m1-check-${report.at.slice(0, 10)}.json`);

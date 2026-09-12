@@ -1,5 +1,5 @@
 {
-  "at": "2026-09-12T21:21:46.036Z",
+  "at": "2026-09-12T21:46:31.775Z",
   "seconds": 5,
   "status": {
     "state": "running",
@@ -36,17 +36,19 @@
     },
     "local file decoded into the engine": {
       "ok": true,
-      "note": "M1 test 120 BPM in 93 ms"
+      "note": "M1 test 120 BPM in 62 ms"
     },
     "playhead follows the engine (no drift)": {
       "ok": true,
       "playing": true,
-      "seconds": 5.0295,
+      "seconds": 5.032800000011921,
       "moved": 5.032,
-      "driftMs": 2.500000000000391,
-      "worstMs": 2.500000000000391,
+      "driftMs": -0.8000000119210426,
+      "worstMs": 3.899999976158197,
       "underruns": 0,
-      "note": "5.0 s wall, 5.032 s audio, drift 2.5 ms, worst 2.5 ms, underruns 0"
+      "samples": 5,
+      "cutShort": null,
+      "note": "5.0 s wall, 5.032 s audio, drift -0.8 ms, worst 3.9 ms, underruns 0"
     },
     "seek is followed": {
       "ok": true,
@@ -57,14 +59,14 @@
       "ok": true,
       "inSec": 30,
       "outSec": 32,
-      "min": 30.028,
-      "max": 31.932,
-      "note": "30.00–32.00 s, seen 30.028–31.932 over 4 s"
+      "min": 30.032,
+      "max": 31.928,
+      "note": "30.00–32.00 s, seen 30.032–31.928 over 4 s"
     },
     "tempo slider changes the engine rate": {
       "ok": true,
-      "rate": 1.1005054239126444,
-      "note": "+10 % slider → 1.1005x"
+      "rate": 1.0999780005344337,
+      "note": "+10 % slider → 1.1000x"
     },
     "CUE stops and returns to the cue point": {
       "ok": true,
@@ -77,16 +79,16 @@
       "ok": true,
       "start": 40,
       "target": 40.99999999999994,
-      "landed": 40.98995388871427,
+      "landed": 40.989951513929064,
       "note": "hand moved 1.000 s, engine landed -10 ms from it"
     },
     "channel fader gates the deck": {
       "ok": true,
-      "note": "deck peak 0.373 with the fader up, 0.0000 down"
+      "note": "deck peak 0.163 with the fader up, 0.0000 down"
     },
     "crossfader hard right removes deck A from the master": {
       "ok": true,
-      "note": "master peak 0.067 hard left, 0.0000 hard right"
+      "note": "master peak 0.060 hard left, 0.0000 hard right"
     },
     "no underruns": {
       "ok": true,

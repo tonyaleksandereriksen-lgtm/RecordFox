@@ -2,6 +2,7 @@
 #include "rfx_atomic.h"
 #include "rfx_audio.h"
 #include "rfx_dsp.h"
+#include "rfx_file.h"
 
 /* miniaudio's implementation lives in rfx_audio.c; here we only need its declarations, and they
  * must be the same ones that TU compiled — so no MA_NO_* switches in this file. */
@@ -171,7 +172,7 @@ int rfx_deck_load(int deck, const char* path)
     k = &g_deck[deck];
 
     cfg = ma_decoder_config_init(ma_format_s16, 2, g_rate);
-    r = ma_decoder_init_file(path, &cfg, &dec);
+    r = rfx_decoder_init_utf8(path, &cfg, &dec);
     if (r != MA_SUCCESS) { set_engine_err("could not open the audio file", r); return 3; }
 
     /* Ask how long it is; some formats will not say, so grow as we go. */
@@ -365,7 +366,7 @@ int rfx_probe_file(const char* path, double* lengthSeconds, int* sampleRate, int
     if (path == NULL || path[0] == 0) { set_engine_err("no file given", MA_SUCCESS); return 2; }
 
     /* No config: keep the file's own format so the numbers describe the file, not the engine. */
-    r = ma_decoder_init_file(path, NULL, &dec);
+    r = rfx_decoder_init_utf8(path, NULL, &dec);
     if (r != MA_SUCCESS) { set_engine_err("could not open the audio file", r); return 3; }
     if (ma_decoder_get_length_in_pcm_frames(&dec, &length) != MA_SUCCESS) length = 0;
     if (sampleRate) *sampleRate = (int)dec.outputSampleRate;

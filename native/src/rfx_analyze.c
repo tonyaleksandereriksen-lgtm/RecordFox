@@ -1,5 +1,6 @@
 #include "rfx_analyze.h"
 #include "rfx_fft.h"
+#include "rfx_file.h"
 
 #include "miniaudio.h"
 
@@ -603,7 +604,7 @@ int rfx_analyze_file(const char* path, rfx_analysis* out)
      * conversion config is in place the decoder only ever reports what it converts to. */
     {
         ma_decoder probe;
-        if (ma_decoder_init_file(path, NULL, &probe) == MA_SUCCESS) {
+        if (rfx_decoder_init_utf8(path, NULL, &probe) == MA_SUCCESS) {
             ma_format fmt;
             ma_uint32 ch, sr;
             if (ma_decoder_get_data_format(&probe, &fmt, &ch, &sr, NULL, 0) == MA_SUCCESS) {
@@ -616,7 +617,7 @@ int rfx_analyze_file(const char* path, rfx_analysis* out)
 
     /* Mono at the analysis rate: miniaudio does the mixdown and the resampling. */
     cfg = ma_decoder_config_init(ma_format_f32, 1, AN_RATE);
-    r = ma_decoder_init_file(path, &cfg, &dec);
+    r = rfx_decoder_init_utf8(path, &cfg, &dec);
     if (r != MA_SUCCESS) {
         fail(out, "could not open the audio file");
         snprintf(out->error, sizeof(out->error), "could not open the audio file: %s", ma_result_description(r));

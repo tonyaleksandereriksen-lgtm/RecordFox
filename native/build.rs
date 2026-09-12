@@ -41,6 +41,7 @@ fn main() {
         "src/rfx_engine.c",
         "src/rfx_engine.h",
         "src/rfx_atomic.h",
+        "src/rfx_file.h",
         "src/rfx_fft.c",
         "src/rfx_fft.h",
         "src/rfx_analyze.c",

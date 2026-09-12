@@ -3,6 +3,7 @@
  * what came out. Run from the native/ folder after generating the fixtures (see tests/README).
  */
 #include "rfx_engine.h"
+#include "rfx_file.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -36,7 +37,7 @@ static int write_sine_wav(const char* path, double freqLeft, double freqRight, d
     unsigned int frames = (unsigned int)(seconds * rate);
     unsigned int dataBytes = frames * 4;      /* stereo, 16-bit */
     unsigned char header[44];
-    FILE* f = fopen(path, "wb");
+    FILE* f = rfx_fopen_utf8(path, "wb");
     unsigned int i;
     if (f == NULL) return 1;
 
@@ -315,6 +316,22 @@ int rfx_engine_test_main(const char* dir)
         printf("     probe: %.3f s, %d Hz, %d ch\n", len, sr, ch);
         check(fabs(len - 2.0) < 0.01 && sr == 44100 && ch == 2, "the probe reports the file's own duration, rate and channels");
         check(rfx_probe_file("/no/such/file.wav", &len, &sr, &ch) != 0, "probing a missing file fails cleanly");
+    }
+
+    /* --- a UTF-8 path outside the ANSI code page ("prøve" — ø is C3 B8) ------ */
+    {
+        char utf8[512];
+        double len = 0.0;
+        int sr = 0, ch = 0;
+        snprintf(utf8, sizeof(utf8), "%s/rfx-test-pr\xC3\xB8ve.wav", dir);
+        if (write_sine_wav(utf8, 1000.0, 1000.0, 1.0, 48000) != 0) {
+            check(0, "could not write the UTF-8 named fixture");
+        } else {
+            check(rfx_probe_file(utf8, &len, &sr, &ch) == 0 && fabs(len - 1.0) < 0.01, "probes a file whose name has a non-ASCII character");
+            check(rfx_deck_load(1, utf8) == 0, "loads a file whose name has a non-ASCII character");
+            rfx_deck_eject(1);
+            rfx_remove_utf8(utf8);
+        }
     }
 
     /* --- looping -------------------------------------------------------- */

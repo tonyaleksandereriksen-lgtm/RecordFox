@@ -2,8 +2,9 @@
 // Chrome DevTools Protocol and measures: the engine's clock against wall time (drift), whether
 // seek / loop / tempo / cue / scratch are followed by the engine, the fader and crossfader through
 // the real meters, and the underrun count. Writes docs/m1-check-<date>.json.
-//   node scripts/m1-check.mjs [--seconds 60] [--wav path]
-// Sound comes out of the FLX2's master at a low level (master knob at 0.25).
+//   node scripts/m1-check.mjs [--seconds 60] [--wav path] [--shot file.png]
+// Sound comes out of the FLX2's master at a low level (master knob at 0.25). --shot captures the
+// window while the track plays.
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -21,6 +22,7 @@ const opt = (name, dflt) => {
   return i >= 0 && args[i + 1] !== undefined ? args[i + 1] : dflt;
 };
 const SECONDS = Number(opt('seconds', 60));
+const SHOT = opt('shot', null);
 // The track must outlast the run: the engine stops a deck at the end of its track (by design).
 const TRACK_SECONDS = SECONDS + 90;
 const WAV = path.resolve(opt('wav', path.join(root, 'native', 'target', `rekordfox-test-120bpm-${TRACK_SECONDS}s.wav`)));
@@ -82,8 +84,10 @@ ws.onmessage = (ev) => {
     pending.delete(m.id);
   }
 };
+let appClosed = false;
 ws.onclose = () => {
-  for (const settle of pending.values()) settle({ error: { message: 'the app closed the DevTools connection' } });
+  appClosed = true;
+  for (const settle of pending.values()) settle({ error: { message: 'the app window was closed' } });
   pending.clear();
 };
 const cdp = (method, params = {}) =>
@@ -93,6 +97,7 @@ const cdp = (method, params = {}) =>
     ws.send(JSON.stringify({ id, method, params }));
   });
 await cdp('Runtime.enable');
+await cdp('Page.enable');
 
 /** Runs an async function body in the page; returns its JSON value. */
 async function inPage(body) {
@@ -149,24 +154,46 @@ await inPage(`
   return true;
 `);
 
-// 4. play and follow the clock
-const clock = await inPage(`
+// 4. play and follow the clock — sampled from here, one second at a time, so a run cut short by a
+//    closed window still reports what it saw.
+await inPage(`
+  document.title = 'RekordFox — M1 check running for ${SECONDS} s, please leave this window open';
   __m1.dispatch({ type: 'deck/playPause', deck: 0 });
   await __m1.sleep(300);
-  const t0 = performance.now(); const p0 = __m1.deck().positionSec;
-  const samples = [];
-  const end = t0 + ${SECONDS} * 1000;
-  while (performance.now() < end) {
-    await __m1.sleep(1000);
-    samples.push({ t: (performance.now() - t0) / 1000, p: __m1.deck().positionSec - p0 });
-  }
-  const last = samples[samples.length - 1];
-  const worst = samples.reduce((m, s) => Math.max(m, Math.abs(s.p - s.t)), 0);
-  return { playing: __m1.deck().playing, seconds: last.t, moved: last.p, driftMs: (last.p - last.t) * 1000, worstMs: worst * 1000, underruns: rekordfox.audio.status.underruns };
+  window.__m1.t0 = performance.now(); window.__m1.p0 = __m1.deck().positionSec;
+  return true;
 `);
-check('playhead follows the engine (no drift)', clock.playing && Math.abs(clock.driftMs) < 50 && clock.worstMs < 80, { ...clock, note: `${clock.seconds.toFixed(1)} s wall, ${clock.moved.toFixed(3)} s audio, drift ${clock.driftMs.toFixed(1)} ms, worst ${clock.worstMs.toFixed(1)} ms, underruns ${clock.underruns}${clock.playing ? '' : ' — the deck stopped (end of track?)'}` });
+const samples = [];
+let clockError = null;
+try {
+  while (samples.length < SECONDS) {
+    await new Promise((r) => setTimeout(r, 1000));
+    samples.push(await inPage(`const d = __m1.deck(); return { t: (performance.now() - __m1.t0) / 1000, p: d.positionSec - __m1.p0, playing: d.playing, underruns: rekordfox.audio.status.underruns };`));
+  }
+} catch (e) {
+  clockError = e.message;
+}
+const last = samples[samples.length - 1] ?? { t: 0, p: 0, playing: false, underruns: 0 };
+const worst = samples.reduce((m, s) => Math.max(m, Math.abs(s.p - s.t)), 0);
+const clock = { playing: last.playing, seconds: last.t, moved: last.p, driftMs: (last.p - last.t) * 1000, worstMs: worst * 1000, underruns: last.underruns, samples: samples.length, cutShort: clockError };
+check('playhead follows the engine (no drift)', clock.playing && !clockError && Math.abs(clock.driftMs) < 50 && clock.worstMs < 80, {
+  ...clock,
+  note: `${clock.seconds.toFixed(1)} s wall, ${clock.moved.toFixed(3)} s audio, drift ${clock.driftMs.toFixed(1)} ms, worst ${clock.worstMs.toFixed(1)} ms, underruns ${clock.underruns}${clock.playing ? '' : ' — the deck stopped (end of track?)'}${clockError ? ` — cut short: ${clockError}` : ''}`,
+});
+if (appClosed) {
+  const report = { at: new Date().toISOString(), seconds: SECONDS, status, results, cutShort: true };
+  writeFileSync(path.join(root, 'docs', `m1-check-${report.at.slice(0, 10)}.json`), JSON.stringify(report, null, 2));
+  console.log('the app window was closed before the run finished — partial report written');
+  process.exit(1);
+}
 // The rest needs a playing deck.
 await inPage(`if (!__m1.deck().playing) __m1.dispatch({ type: 'deck/playPause', deck: 0 }); return true;`);
+if (SHOT) {
+  await new Promise((r) => setTimeout(r, 400));
+  const shot = await cdp('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(path.resolve(SHOT), Buffer.from(shot.data, 'base64'));
+  console.log(`screenshot: ${SHOT}`);
+}
 
 // 5. seek
 const seek = await inPage(`

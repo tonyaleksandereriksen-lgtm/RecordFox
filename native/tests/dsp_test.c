@@ -5,9 +5,9 @@
 #include <stdio.h>
 #include <string.h>
 
-/* MSVC only defines M_PI behind _USE_MATH_DEFINES; use the same constant rfx_dsp.c does. */
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
+/* MSVC does not define M_PI without _USE_MATH_DEFINES; carry our own. */
+#ifndef D_PI
+#define D_PI 3.14159265358979323846
 #endif
 
 static int failures = 0;
@@ -27,7 +27,7 @@ static double response_db(double freq, double (*proc)(double x, void* user), voi
     int i;
     /* skip the first 2000 frames so the filter state settles */
     for (i = 0; i < NFRAMES; i += 1) {
-        double x = sin(2.0 * M_PI * freq * (double)i / RATE);
+        double x = sin(2.0 * D_PI * freq * (double)i / RATE);
         double y = proc(x, user);
         if (i > 2000) {
             sumIn += x * x;
@@ -174,10 +174,10 @@ int rfx_dsp_test_main(void)
             double f = t - (double)n;
             double s[4];
             int k;
-            for (k = 0; k < 4; k += 1) s[k] = sin(2.0 * M_PI * 1000.0 * (double)(n - 1 + k) / RATE);
+            for (k = 0; k < 4; k += 1) s[k] = sin(2.0 * D_PI * 1000.0 * (double)(n - 1 + k) / RATE);
             {
                 double got  = rfx_interp_cubic(s[0], s[1], s[2], s[3], f);
-                double want = sin(2.0 * M_PI * 1000.0 * t / RATE);
+                double want = sin(2.0 * D_PI * 1000.0 * t / RATE);
                 double d = fabs(got - want);
                 if (d > err) err = d;
             }

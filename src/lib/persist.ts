@@ -28,7 +28,13 @@ export function loadSaved(storage: StorageLike | undefined = globalThis.localSto
 export function snapshot(s: EngineState): Saved {
   const tracks: Record<string, TrackEdits> = {};
   for (const t of s.library.tracks) {
-    tracks[t.id] = { rating: t.rating, comment: t.comment, playlists: t.playlists, cues: t.cues ?? [] };
+    const edits: TrackEdits = { rating: t.rating, comment: t.comment, playlists: t.playlists, cues: t.cues ?? [] };
+    // Only a grid the DJ corrected is worth saving; an untouched one comes back from analysis.
+    if (t.bpmOriginal !== undefined) {
+      edits.bpm = t.bpm;
+      edits.firstBeatSec = t.firstBeatSec;
+    }
+    tracks[t.id] = edits;
   }
   return { prefs: s.prefs, tracks };
 }

@@ -49,6 +49,8 @@ export class EngineBridge {
   private lastFrames = -1;
   private stalled = 0;
   private reopened = false;
+  /** Raw counters for diagnosis (Settings and scripts/m1-check.mjs read them); not React state. */
+  readonly health = { frames: 0, callbacks: 0, maxBlock: 0, underruns: 0, stalls: 0, reopens: 0, snapshotAt: 0, frameMs: 0 };
 
   constructor(store: Engine, host: AudioHost, onStatus: (status: AudioStatus) => void) {
     this.store = store;
@@ -76,13 +78,20 @@ export class EngineBridge {
       this.setStatus({ state: 'error', message: hostErrorMessage(e) });
       return;
     }
-    // A (re)start leaves the engine's decks empty: forget what it held so the tracks are reloaded.
-    this.mirror = [null, null];
-    this.master = null;
-    this.held = [null, null];
-    this.discrete = [];
-    this.continuous.clear();
-    for (const deck of DECKS) this.store.dispatch({ type: 'deck/engine', deck, ready: false });
+    this.resume(true);
+  }
+
+  /** Mirroring again after (re)opening. `reloaded`: the engine's decks are empty and must be refilled. */
+  private resume(reloaded: boolean): void {
+    if (reloaded) {
+      // Forget what the engine held so the tracks are loaded and every parameter sent again.
+      this.mirror = [null, null];
+      this.master = null;
+      this.held = [null, null];
+      this.discrete = [];
+      this.continuous.clear();
+      for (const deck of DECKS) this.store.dispatch({ type: 'deck/engine', deck, ready: false });
+    }
     this.running = true;
     meters.live = true;
     this.unsubscribe ??= this.store.subscribe(() => this.onState());
@@ -167,9 +176,11 @@ export class EngineBridge {
       gen: [this.gen[0], this.gen[1]],
     };
     this.inFlight = true;
+    const sentAt = performance.now();
     this.host.frame(this.take()).then(
       (snap) => {
         this.inFlight = false;
+        this.health.frameMs = performance.now() - sentAt;
         if (!this.running) return;
         if (snap === null) {
           // The main process stopped the engine (quitting, or a reopen in progress): go quiet.
@@ -190,13 +201,23 @@ export class EngineBridge {
     );
   }
 
-  /** The device callback runs whether or not anything plays, so a frozen frame counter means the output died. */
-  private static readonly STALL_FRAMES = 90;
+  /**
+   * The device callback runs whether or not anything plays (every 2 ms on the FLX2), so a frame counter
+   * that stands still across this many snapshots (~0.3 s) means the output died. Every frame of delay
+   * here is a frame of silence in the room, so this is short; a scheduler hiccup of a few tens of
+   * milliseconds cannot trip it.
+   */
+  private static readonly STALL_FRAMES = 20;
 
   private onSnapshot(snap: EngineSnapshot, sent: Sent): void {
     meters.deck[0] = snap.peak[0] ?? 0;
     meters.deck[1] = snap.peak[1] ?? 0;
     meters.master = snap.masterPeak;
+    this.health.frames = snap.frames;
+    this.health.callbacks = snap.callbacks;
+    this.health.maxBlock = snap.maxBlock;
+    this.health.underruns = snap.underruns;
+    this.health.snapshotAt = performance.now();
     if (snap.underruns !== this.underruns && this.lastStatus.state === 'running') {
       this.underruns = snap.underruns;
       this.setStatus({ ...this.lastStatus, underruns: snap.underruns });
@@ -225,17 +246,44 @@ export class EngineBridge {
     if (positions[0] !== null || positions[1] !== null) this.store.dispatch({ type: 'transport/sync', positions, playing });
   }
 
-  /** The output stopped (unplugged, or taken by another program): reopen once on whatever is there. */
+  /**
+   * The output stopped (unplugged, or taken by another program): reopen once on whatever is there.
+   * The engine keeps its decks and positions across a reopen; only a rate change empties them.
+   */
   private onStall(): void {
     this.running = false;
     meters.live = false;
+    this.health.stalls += 1;
     if (this.reopened) {
       this.setStatus({ state: 'error', message: 'The audio output stopped and could not be reopened — check the device and press Start in Settings › Audio.' });
       return;
     }
     this.reopened = true;
+    this.health.reopens += 1;
     this.store.dispatch({ type: 'ui/toast', text: 'The audio output stopped (unplugged, or taken by another program) — reopening', tone: 'warn' });
-    void this.start(this.store.getState().prefs.audioDevice);
+    void this.reopen();
+  }
+
+  /** What the stall detector does, on demand — from DevTools (`rekordfox.audio.reopenNow()`) or a check script. */
+  reopenNow(): Promise<void> {
+    this.running = false;
+    meters.live = false;
+    this.health.reopens += 1;
+    return this.reopen();
+  }
+
+  private async reopen(): Promise<void> {
+    this.setStatus({ state: 'starting' });
+    try {
+      const { status, reloaded } = await this.host.reopen({ device: this.store.getState().prefs.audioDevice });
+      this.underruns = 0;
+      this.lastFrames = -1;
+      this.stalled = 0;
+      this.setStatus(status);
+      this.resume(reloaded);
+    } catch (e) {
+      this.setStatus({ state: 'error', message: hostErrorMessage(e) });
+    }
   }
 
   private async load(deck: DeckIndex, track: Track, gen: number): Promise<void> {

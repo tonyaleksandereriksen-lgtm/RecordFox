@@ -171,17 +171,23 @@ let clockError = null;
 try {
   while (samples.length < SECONDS) {
     await new Promise((r) => setTimeout(r, 1000));
-    samples.push(await inPage(`const d = __m1.deck(); return { t: (performance.now() - __m1.t0) / 1000, p: d.positionSec - __m1.p0, playing: d.playing, underruns: rekordfox.audio.status.underruns };`));
+    samples.push(await inPage(`const d = __m1.deck(); const h = rekordfox.audio.health; return { t: (performance.now() - __m1.t0) / 1000, p: d.positionSec - __m1.p0, playing: d.playing, underruns: h.underruns, frames: h.frames, callbacks: h.callbacks, maxBlock: h.maxBlock, stalls: h.stalls, reopens: h.reopens, frameMs: Math.round(h.frameMs * 10) / 10, snapshotAgeMs: Math.round(performance.now() - h.snapshotAt) };`));
   }
 } catch (e) {
   clockError = e.message;
 }
 const last = samples[samples.length - 1] ?? { t: 0, p: 0, playing: false, underruns: 0 };
 const worst = samples.reduce((m, s) => Math.max(m, Math.abs(s.p - s.t)), 0);
-const clock = { playing: last.playing, seconds: last.t, moved: last.p, driftMs: (last.p - last.t) * 1000, worstMs: worst * 1000, underruns: last.underruns, samples: samples.length, cutShort: clockError };
+// Where the playhead and the wall clock parted company, if they did: the biggest jump in (p - t) between samples.
+let jump = { at: 0, ms: 0 };
+for (let i = 1; i < samples.length; i += 1) {
+  const d = (samples[i].p - samples[i].t - (samples[i - 1].p - samples[i - 1].t)) * 1000;
+  if (Math.abs(d) > Math.abs(jump.ms)) jump = { at: samples[i].t, ms: d };
+}
+const clock = { playing: last.playing, seconds: last.t, moved: last.p, driftMs: (last.p - last.t) * 1000, worstMs: worst * 1000, underruns: last.underruns, stalls: last.stalls, reopens: last.reopens, biggestJump: jump, samples, cutShort: clockError };
 check('playhead follows the engine (no drift)', clock.playing && !clockError && Math.abs(clock.driftMs) < 50 && clock.worstMs < 80, {
   ...clock,
-  note: `${clock.seconds.toFixed(1)} s wall, ${clock.moved.toFixed(3)} s audio, drift ${clock.driftMs.toFixed(1)} ms, worst ${clock.worstMs.toFixed(1)} ms, underruns ${clock.underruns}${clock.playing ? '' : ' — the deck stopped (end of track?)'}${clockError ? ` — cut short: ${clockError}` : ''}`,
+  note: `${clock.seconds.toFixed(1)} s wall, ${clock.moved.toFixed(3)} s audio, drift ${clock.driftMs.toFixed(1)} ms, worst ${clock.worstMs.toFixed(1)} ms, underruns ${clock.underruns}, stalls ${clock.stalls ?? 0}, reopens ${clock.reopens ?? 0}, biggest jump ${jump.ms.toFixed(0)} ms at ${jump.at.toFixed(0)} s${clock.playing ? '' : ' — the deck stopped (end of track?)'}${clockError ? ` — cut short: ${clockError}` : ''}`,
 });
 if (appClosed) {
   const report = { at: new Date().toISOString(), seconds: SECONDS, status, results, cutShort: true };
@@ -197,6 +203,18 @@ if (SHOT) {
   writeFileSync(path.resolve(SHOT), Buffer.from(shot.data, 'base64'));
   console.log(`screenshot: ${SHOT}`);
 }
+
+// 4b. reopening the output mid-playback (what happens after a stall) keeps the deck and its position
+const reopen = await inPage(`
+  const before = __m1.deck().positionSec; const t0 = performance.now();
+  await rekordfox.audio.reopenNow();
+  const opened = performance.now() - t0;
+  await __m1.sleep(1500);
+  const d = __m1.deck();
+  const elapsed = (performance.now() - t0) / 1000;
+  return { state: rekordfox.audio.status.state, engine: d.engine, playing: d.playing, openedMs: Math.round(opened), lostMs: Math.round((elapsed - (d.positionSec - before)) * 1000), reopens: rekordfox.audio.health.reopens };
+`);
+check('reopening the output keeps the deck playing where it was', reopen.state === 'running' && reopen.engine && reopen.playing && reopen.lostMs < 700, { ...reopen, note: `reopened in ${reopen.openedMs} ms, ${reopen.lostMs} ms of audio lost, deck ${reopen.engine ? 'kept' : 'RELOADED'}` });
 
 // 5. seek
 const seek = await inPage(`

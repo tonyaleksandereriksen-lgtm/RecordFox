@@ -91,10 +91,9 @@ async function stopAudio() {
  * Opens `opts.device` (by name), else the FLX2, else the default output. The FLX2 is tried
  * exclusive at 48 kHz / 4 ch from 96 frames up (what the probe measured at 4 ms), then shared;
  * anything else is opened shared with 2 channels, so a surround card never gets the cue bus.
+ * Re-enumerates first, so a unit plugged in (or pulled) since the last open is seen.
  */
-async function startAudio(opts) {
-  if (!rfx) throw new Error(status.reason);
-  await stopAudio();
+function openOutput(opts) {
   rfx.uninit();
   const backend = rfx.init();
   const list = rfx.devices();
@@ -129,8 +128,7 @@ async function startAudio(opts) {
   else if (flx2 && !info.exclusive) notes.push(`Exclusive mode was refused (${refused[refused.length - 1] ?? 'unknown reason'}) — shared mode, higher latency`);
   if (info.channels < 4) notes.push(`This output has ${info.channels} channels, so headphone cue is off`);
 
-  rfx.engineInit(info.sampleRate);
-  status = {
+  return {
     state: 'running',
     device: info.name,
     flx2,
@@ -144,12 +142,42 @@ async function startAudio(opts) {
     note: notes.length ? notes.join('. ') : null,
     underruns: 0,
   };
+}
+
+async function startAudio(opts) {
+  if (!rfx) throw new Error(status.reason);
+  await stopAudio();
+  const opened = openOutput(opts);
+  rfx.engineInit(opened.sampleRate);
+  status = opened;
   return status;
+}
+
+/**
+ * The output died (unplugged, or taken by another program): open an output again but keep the
+ * engine — its decks, positions and settings stay in RAM — unless the new output runs at another
+ * rate, in which case the engine must restart and the renderer reload the tracks (`reloaded`).
+ */
+async function reopenAudio(opts) {
+  if (!rfx) throw new Error(status.reason);
+  await Promise.all(trackOps);
+  rfx.close();
+  status = { state: 'idle' };
+  const opened = openOutput(opts);
+  let reloaded = false;
+  if (opened.sampleRate !== rfx.engineSampleRate()) {
+    rfx.engineShutdown();
+    rfx.engineInit(opened.sampleRate);
+    reloaded = true;
+  }
+  status = opened;
+  return { status, reloaded };
 }
 
 function registerAudio(getWindow) {
   ipcMain.handle('rfx:status', () => status);
   ipcMain.handle('rfx:start', (_e, opts) => startAudio(opts));
+  ipcMain.handle('rfx:reopen', (_e, opts) => reopenAudio(opts));
   ipcMain.handle('rfx:stop', () => stopAudio());
   ipcMain.handle('rfx:devices', () => listDevices());
   ipcMain.handle('rfx:frame', (_e, cmds) => {
@@ -200,4 +228,4 @@ function shutdownSync() {
   status = { state: 'idle' };
 }
 
-module.exports = { registerAudio, startAudio, stopAudio, shutdownSync, available: rfx !== null };
+module.exports = { registerAudio, startAudio, reopenAudio, stopAudio, shutdownSync, available: rfx !== null };

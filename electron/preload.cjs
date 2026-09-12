@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('rekordfoxHost', {
   audio: {
     status: () => ipcRenderer.invoke('rfx:status'),
     start: (opts) => ipcRenderer.invoke('rfx:start', opts),
+    reopen: (opts) => ipcRenderer.invoke('rfx:reopen', opts),
     stop: () => ipcRenderer.invoke('rfx:stop'),
     devices: () => ipcRenderer.invoke('rfx:devices'),
     /** Commands in, snapshot out: the one IPC round trip per animation frame. */

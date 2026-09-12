@@ -63,6 +63,8 @@ export interface AudioHost {
   status(): Promise<AudioStatus>;
   /** Opens the output (the FLX2 in exclusive mode when it is there) and starts the engine. */
   start(opts: { device: string | null }): Promise<AudioRunning>;
+  /** After the output died: opens one again, keeping the engine's decks unless the rate changed (`reloaded`). */
+  reopen(opts: { device: string | null }): Promise<{ status: AudioRunning; reloaded: boolean }>;
   stop(): Promise<void>;
   devices(): Promise<AudioDevice[]>;
   /** Applies a batch of commands, then returns the engine's snapshot: one round trip per frame. Null once the engine has stopped. */

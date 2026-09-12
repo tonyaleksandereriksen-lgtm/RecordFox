@@ -10,9 +10,35 @@ import { Icon, type IconName } from '../common/Icon.tsx';
 import { Mark, Wordmark } from '../common/Logo.tsx';
 import { Stars } from '../common/Stars.tsx';
 import { TRACK_MIME, deckLetter } from '../deck/Deck.tsx';
-import { dispatch, useEngine } from '../hooks.ts';
+import { dispatch, useEngine, useHost } from '../hooks.ts';
 import { TrackWave } from '../waveform/Overview.tsx';
 import { APP_TAGLINE } from '../../brand.ts';
+import { audioHost } from '../../audio/host.ts';
+import { addActions, pickLocalFiles } from '../../audio/localFiles.ts';
+
+/** Desktop only: pick audio files, probe them through the engine, add them to the library. */
+function AddFiles() {
+  const { audio } = useHost();
+  const [busy, setBusy] = useState(false);
+  const host = audioHost();
+  if (!host || audio.state === 'unavailable') return null;
+  return (
+    <button
+      className="btn"
+      disabled={busy}
+      onClick={() => {
+        setBusy(true);
+        pickLocalFiles(host)
+          .then((r) => addActions(r).forEach(dispatch))
+          .catch((e) => dispatch({ type: 'ui/toast', text: `Could not add files: ${String((e as Error)?.message ?? e)}`, tone: 'warn' }))
+          .finally(() => setBusy(false));
+      }}
+      title="Add wav, flac or mp3 files from this computer"
+    >
+      <Icon name="folder" /> Add files…
+    </button>
+  );
+}
 
 const playlistIcon = (p: Playlist): IconName => (p.smart === 'favorites' ? 'star' : p.smart === 'recent' ? 'clock' : 'playlist');
 
@@ -172,6 +198,7 @@ function TrackTable() {
         <span className="search-count mono">
           {rows.length} / {tracks.length}
         </span>
+        <AddFiles />
       </div>
       <div className="table" role="grid" aria-label="Tracks" aria-rowcount={rows.length} tabIndex={0} onKeyDown={onKey}>
         <div className="tr head" role="row">

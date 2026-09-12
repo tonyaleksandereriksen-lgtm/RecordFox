@@ -14,6 +14,7 @@ import {
 } from '../../audio/audioCheck.ts';
 import { midi } from '../../runtime.ts';
 import { useMidiStatus } from '../hooks.ts';
+import { AudioEngine } from './AudioEngine.tsx';
 
 const HINTS: (AudioContextLatencyCategory | number)[] = ['interactive', 'balanced', 0.005];
 const hintLabel = (h: string) => (h === 'interactive' ? 'Interactive' : h === 'balanced' ? 'Balanced' : `${Number(h) * 1000} ms hint`);
@@ -133,12 +134,13 @@ export function AudioCheck() {
   return (
     <div className="settings-page">
       <header className="page-head">
-        <h2>Audio check</h2>
-        <p>
-          Measures what the built-in audio engine can do with your output before RekordFox’s audio engine is built: latency, whether master and headphones can be split across the DDJ-FLX2’s four
-          output channels, and how long a PLAY press takes to become sound. Copy the result at the end and send it back.
-        </p>
+        <h2>Audio</h2>
+        <p>The native engine plays the decks. Below it, the browser-side check from the audit stays for comparison: it measured ~52 ms on the FLX2, which is why the engine went native.</p>
       </header>
+      <div className="cards one">
+        <AudioEngine />
+      </div>
+      <h3 className="section-title">Browser audio check</h3>
       {error && <p className="error-text">{error}</p>}
 
       <div className="steps">

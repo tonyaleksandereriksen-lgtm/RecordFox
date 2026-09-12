@@ -1,8 +1,13 @@
-/** Demo levels (post-fader energy of the demo waveform) until the audio graph supplies real meters. */
+/**
+ * Meter levels. With the native engine running they are its real post-fader peaks (src/audio/meters.ts);
+ * otherwise a guess from the demo waveform so the browser build still looks alive.
+ */
+import { meters } from '../../audio/meters.ts';
 import type { DeckIndex, EngineState } from '../../engine/types.ts';
 import { levelAt, waveformFor } from '../../engine/waveform.ts';
 
 export function channelLevel(s: EngineState, ch: DeckIndex): number {
+  if (meters.live) return Math.min(1.1, meters.deck[ch]);
   const d = s.decks[ch];
   if (!d.track || !d.playing || (d.jogTouched && d.vinyl)) return 0;
   const m = s.mixer.ch[ch];
@@ -16,6 +21,7 @@ export function crossfaderGain(xf: number, ch: DeckIndex): number {
 }
 
 export function masterLevel(s: EngineState): number {
+  if (meters.live) return Math.min(1.1, meters.master);
   const a = channelLevel(s, 0) * crossfaderGain(s.mixer.crossfader, 0);
   const b = channelLevel(s, 1) * crossfaderGain(s.mixer.crossfader, 1);
   return Math.min(1.1, Math.max(a, b) * (0.4 + s.mixer.masterLevel * 0.75));

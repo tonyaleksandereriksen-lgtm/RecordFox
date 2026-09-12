@@ -1,3 +1,4 @@
+import { audioSummary } from '../audio/status.ts';
 import { APP_NAME, APP_TAGLINE, APP_VERSION } from '../brand.ts';
 import { useEngine, useHost, useMidiStatus } from './hooks.ts';
 
@@ -6,7 +7,7 @@ export function Footer() {
   const { status, virtual } = useMidiStatus();
   const { audio, isElectron } = useHost();
   const midiText = status.kind === 'connected' ? 'FLX2 connected' : virtual ? 'Virtual FLX2' : status.kind === 'searching' ? 'Searching for FLX2' : 'FLX2 not connected';
-  const audioText = audio.state === 'found' ? 'FLX2 audio found' : 'Audio engine: next slice';
+  const audioText = audioSummary(audio).short;
   return (
     <footer className="footer">
       <span>

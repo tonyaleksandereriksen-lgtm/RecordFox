@@ -1,3 +1,4 @@
+import { audioSummary } from '../../audio/status.ts';
 import { LEARNABLE } from '../../midi/learn.ts';
 import { connectController, midi, setVirtualAttached } from '../../runtime.ts';
 import { dispatch, useHost, useMidiStatus } from '../hooks.ts';
@@ -46,18 +47,9 @@ export function ControllerSettings() {
       line = `${status.input}${status.output ? ` ↔ ${status.output}` : ''}`;
       break;
   }
-  const audio = host.audio;
-  const audioState: CheckState = audio.state === 'found' ? 'ok' : audio.state === 'unknown' ? 'wait' : 'off';
-  const audioNote =
-    audio.state === 'found'
-      ? `${audio.label} — routing arrives with the audio engine`
-      : audio.state === 'hidden'
-        ? 'Device names are hidden until audio permission is granted (Settings › Audio)'
-        : audio.state === 'absent'
-          ? 'Not visible — the laptop output will be the fallback'
-          : audio.state === 'unsupported'
-            ? 'Audio device selection is not supported here'
-            : 'Checking…';
+  const audio = audioSummary(host.audio);
+  const audioState: CheckState = audio.tone === 'warn' ? (host.audio.state === 'error' ? 'bad' : 'ok') : audio.tone;
+  const audioNote = audio.long;
 
   return (
     <div className="settings-page">

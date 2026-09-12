@@ -2,13 +2,14 @@ import type { CSSProperties } from 'react';
 import { useRef } from 'react';
 import type { ChannelParam } from '../../engine/actions.ts';
 import type { DeckIndex } from '../../engine/types.ts';
+import { cueAvailable } from '../../audio/status.ts';
 import { takeoverKey } from '../../midi/bindings.ts';
 import { store } from '../../runtime.ts';
 import { tokens } from '../../theme/tokens.ts';
 import { deckLetter } from '../deck/Deck.tsx';
 import { Fader } from '../common/Fader.tsx';
 import { Knob } from '../common/Knob.tsx';
-import { dispatch, useCanvas, useEngine, useMidiStatus, useRaf } from '../hooks.ts';
+import { dispatch, useCanvas, useEngine, useHost, useMidiStatus, useRaf } from '../hooks.ts';
 import { channelLevel } from './levels.ts';
 
 const KNOBS: { param: Exclude<ChannelParam, 'fader'>; label: string }[] = [
@@ -69,9 +70,12 @@ function Vu({ ch }: { ch: DeckIndex }) {
 }
 
 /** One channel: the FLX2's knob row, its CUE button and the channel fader. */
+const NO_CUE = 'Headphone cue needs a 4-channel output (the DDJ-FLX2); this output has 2';
+
 function ChannelStrip({ ch }: { ch: DeckIndex }) {
   const fader = useEngine((s) => s.mixer.ch[ch].fader);
   const pfl = useEngine((s) => s.mixer.ch[ch].pfl);
+  const cue = cueAvailable(useHost().audio);
   return (
     <div className={`ch-strip${ch === 1 ? ' right' : ''}`} style={{ '--deck': tokens.color.deck[ch] } as CSSProperties} aria-label={`Channel ${ch + 1}`}>
       <div className="ch-head">
@@ -84,7 +88,7 @@ function ChannelStrip({ ch }: { ch: DeckIndex }) {
         ))}
       </div>
       <div className="ch-fader">
-        <button className={`mini cue-btn${pfl ? ' on' : ''}`} onClick={() => dispatch({ type: 'mixer/pfl', ch })} aria-pressed={pfl} title={`Headphone CUE ${ch + 1}`}>
+        <button className={`mini cue-btn${pfl ? ' on' : ''}`} onClick={() => dispatch({ type: 'mixer/pfl', ch })} aria-pressed={pfl} disabled={!cue} title={cue ? `Headphone CUE ${ch + 1}` : NO_CUE}>
           Cue
         </button>
         <Fader
@@ -114,6 +118,7 @@ export function Mixer() {
   const phonesLevel = useEngine((s) => s.mixer.phonesLevel);
   const { learned } = useMidiStatus();
   const isLearned = (id: string) => learned.some((b) => b.id === id);
+  const cue = cueAvailable(useHost().audio);
   return (
     <section className="panel mixer" aria-label="Mixer">
       <ChannelStrip ch={0} />
@@ -138,7 +143,7 @@ export function Mixer() {
           />
         </div>
         <div className="mix-toggles">
-          <button className={`mini${masterCue ? ' on' : ''}`} onClick={() => dispatch({ type: 'mixer/masterCue' })} aria-pressed={masterCue} title="Headphone CUE (MASTER)">
+          <button className={`mini${masterCue ? ' on' : ''}`} onClick={() => dispatch({ type: 'mixer/masterCue' })} aria-pressed={masterCue} disabled={!cue} title={cue ? 'Headphone CUE (MASTER)' : NO_CUE}>
             M.Cue
           </button>
           <button className={`mini${smartCfx ? ' on' : ''}`} onClick={() => dispatch({ type: 'mixer/smartCfx' })} aria-pressed={smartCfx} title="Smart CFX (SHIFT + MASTER CUE on the unit)">

@@ -69,7 +69,7 @@ export function DeckInfo({ deck }: { deck: DeckIndex }) {
         <span className="deck-remain mono" ref={remainRef} title="Remaining" />
         <div className="deck-keys">
           <span className="deck-key" title="Key (Camelot)">
-            {track?.key ?? '—'}
+            {track?.key || '—'}
           </span>
           <span className="deck-bpm mono" title="BPM">
             {formatBpm(bpm)}

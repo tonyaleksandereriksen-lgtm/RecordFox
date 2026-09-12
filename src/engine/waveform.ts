@@ -19,10 +19,16 @@ const cache = new Map<string, WaveformData>();
 export function waveformFor(track: Track): WaveformData {
   let w = cache.get(track.id);
   if (!w) {
-    w = generateDemoWaveform(track);
+    w = track.source === 'local' ? placeholderWaveform(track) : generateDemoWaveform(track);
     cache.set(track.id, w);
   }
   return w;
+}
+
+/** Analysis (M2) replaces this: until then a local file shows an even, quiet band so the playhead has something to cross. */
+export function placeholderWaveform(track: Track, binsPerSec = 100): WaveformData {
+  const n = Math.max(1, Math.ceil(track.durationSec * binsPerSec));
+  return { binsPerSec, length: n, low: new Uint8Array(n).fill(70), mid: new Uint8Array(n).fill(48), high: new Uint8Array(n).fill(30) };
 }
 
 export function generateDemoWaveform(track: Track, binsPerSec = 100): WaveformData {

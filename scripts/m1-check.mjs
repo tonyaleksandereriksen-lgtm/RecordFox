@@ -1,0 +1,230 @@
+// M1 acceptance check. Launches the built desktop app (dist/ + native addon), drives it over the
+// Chrome DevTools Protocol and measures: the engine's clock against wall time (drift), whether
+// seek / loop / tempo / cue / scratch are followed by the engine, the fader and crossfader through
+// the real meters, and the underrun count. Writes docs/m1-check-<date>.json.
+//   node scripts/m1-check.mjs [--seconds 60] [--wav path]
+// Sound comes out of the FLX2's master at a low level (master knob at 0.25).
+import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const args = process.argv.slice(2);
+const opt = (name, dflt) => {
+  const i = args.indexOf(`--${name}`);
+  return i >= 0 && args[i + 1] !== undefined ? args[i + 1] : dflt;
+};
+const SECONDS = Number(opt('seconds', 60));
+const WAV = path.resolve(opt('wav', path.join(root, 'native', 'target', 'rekordfox-test-120bpm.wav')));
+const PORT = 9333;
+
+if (!existsSync(WAV)) {
+  mkdirSync(path.dirname(WAV), { recursive: true });
+  const gen = spawn(process.execPath, [path.join(root, 'scripts', 'make-test-wav.mjs'), WAV, '180'], { stdio: 'inherit' });
+  await new Promise((r) => gen.on('exit', r));
+}
+
+const isWin = process.platform === 'win32';
+const electron = spawn(isWin ? 'npx.cmd' : 'npx', ['electron', '.', `--remote-debugging-port=${PORT}`], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], shell: isWin });
+electron.stdout.on('data', (b) => process.stdout.write(`[app] ${b}`));
+electron.stderr.on('data', (b) => process.stderr.write(`[app] ${b}`));
+const exitCode = () => new Promise((r) => electron.on('exit', r));
+
+async function pageTarget() {
+  for (let i = 0; i < 100; i += 1) {
+    try {
+      const list = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
+      const page = list.find((t) => t.type === 'page' && /^app:\/\//.test(t.url));
+      if (page) return page;
+    } catch {
+      /* not up yet */
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  throw new Error('the app window never appeared on the debugging port');
+}
+
+const target = await pageTarget();
+const ws = new WebSocket(target.webSocketDebuggerUrl);
+await new Promise((res, rej) => {
+  ws.onopen = res;
+  ws.onerror = rej;
+});
+let seq = 0;
+const pending = new Map();
+ws.onmessage = (ev) => {
+  const m = JSON.parse(ev.data);
+  if (m.id && pending.has(m.id)) {
+    pending.get(m.id)(m);
+    pending.delete(m.id);
+  }
+};
+const cdp = (method, params = {}) =>
+  new Promise((res, rej) => {
+    const id = ++seq;
+    pending.set(id, (m) => (m.error ? rej(new Error(m.error.message)) : res(m.result)));
+    ws.send(JSON.stringify({ id, method, params }));
+  });
+await cdp('Runtime.enable');
+
+/** Runs an async function body in the page; returns its JSON value. */
+async function inPage(body) {
+  const r = await cdp('Runtime.evaluate', { expression: `(async () => { ${body} })()`, awaitPromise: true, returnByValue: true });
+  if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
+  return r.result.value;
+}
+
+await inPage(`
+  window.__m1 = {
+    state: () => rekordfox.store.getState(),
+    dispatch: (a) => rekordfox.store.dispatch(a),
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    waitFor: async (fn, timeout) => {
+      const t0 = performance.now();
+      while (performance.now() - t0 < timeout) { if (fn()) return true; await new Promise((r) => setTimeout(r, 50)); }
+      return fn();
+    },
+    deck: () => rekordfox.store.getState().decks[0],
+  };
+  return true;
+`);
+
+const results = {};
+const check = (name, ok, detail) => {
+  results[name] = { ok: !!ok, ...detail };
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail && detail.note ? ` — ${detail.note}` : ''}`);
+};
+
+// 1. the engine is running
+const status = await inPage(`await __m1.waitFor(() => window.rekordfox && window.rekordfox.audio && window.rekordfox.audio.status.state === 'running', 15000); return window.rekordfox && window.rekordfox.audio ? window.rekordfox.audio.status : null;`);
+check('engine running', status && status.state === 'running', { status, note: status ? `${status.device} ${status.exclusive ? 'exclusive' : 'shared'} ${status.sampleRate} Hz ${status.channels} ch ${status.latencyMs.toFixed(2)} ms` : 'no engine' });
+if (!status || status.state !== 'running') {
+  ws.close();
+  electron.kill();
+  process.exit(1);
+}
+
+// 2. a local file on deck A
+const wavJson = JSON.stringify(WAV);
+const loaded = await inPage(`
+  __m1.dispatch({ type: 'library/add', tracks: [{ id: 'local:m1', title: 'M1 test 120 BPM', artist: 'RekordFox', genre: '', bpm: 120, key: '', durationSec: 180, firstBeatSec: 0, hue: 200, seed: 7, source: 'local', path: ${wavJson}, rating: 0, comment: '', playlists: [], addedAt: Date.now() }] });
+  __m1.dispatch({ type: 'deck/load', deck: 0, trackId: 'local:m1' });
+  const t0 = performance.now();
+  const ok = await __m1.waitFor(() => __m1.deck().engine, 15000);
+  return { ok, ms: Math.round(performance.now() - t0), title: __m1.deck().track && __m1.deck().track.title };
+`);
+check('local file decoded into the engine', loaded.ok, { note: `${loaded.title} in ${loaded.ms} ms` });
+
+// 3. mixer set-up: fader up, crossfader hard left, master quiet
+await inPage(`
+  __m1.dispatch({ type: 'mixer/set', ch: 0, param: 'fader', value: 1 });
+  __m1.dispatch({ type: 'mixer/crossfader', value: 0 });
+  __m1.dispatch({ type: 'mixer/master', param: 'masterLevel', value: 0.25 });
+  return true;
+`);
+
+// 4. play and follow the clock
+const clock = await inPage(`
+  __m1.dispatch({ type: 'deck/playPause', deck: 0 });
+  await __m1.sleep(300);
+  const t0 = performance.now(); const p0 = __m1.deck().positionSec;
+  const samples = [];
+  const end = t0 + ${SECONDS} * 1000;
+  while (performance.now() < end) {
+    await __m1.sleep(1000);
+    samples.push({ t: (performance.now() - t0) / 1000, p: __m1.deck().positionSec - p0 });
+  }
+  const last = samples[samples.length - 1];
+  const worst = samples.reduce((m, s) => Math.max(m, Math.abs(s.p - s.t)), 0);
+  return { playing: __m1.deck().playing, seconds: last.t, moved: last.p, driftMs: (last.p - last.t) * 1000, worstMs: worst * 1000, underruns: rekordfox.audio.status.underruns };
+`);
+check('playhead follows the engine (no drift)', clock.playing && Math.abs(clock.driftMs) < 50 && clock.worstMs < 80, { ...clock, note: `${clock.seconds.toFixed(1)} s wall, ${clock.moved.toFixed(3)} s audio, drift ${clock.driftMs.toFixed(1)} ms, worst ${clock.worstMs.toFixed(1)} ms, underruns ${clock.underruns}` });
+
+// 5. seek
+const seek = await inPage(`
+  __m1.dispatch({ type: 'deck/seek', deck: 0, positionSec: 30 });
+  await __m1.sleep(250);
+  return __m1.deck().positionSec;
+`);
+check('seek is followed', seek >= 30 && seek < 30.5, { position: seek, note: `at ${seek.toFixed(3)} s 250 ms after seeking to 30` });
+
+// 6. a 4-beat loop at 120 BPM holds the playhead inside 2 s
+const loop = await inPage(`
+  __m1.dispatch({ type: 'deck/beatLoop', deck: 0, beats: 4 });
+  const l = __m1.deck().loop; let min = 1e9, max = -1e9;
+  for (let i = 0; i < 40; i += 1) { await __m1.sleep(100); const p = __m1.deck().positionSec; min = Math.min(min, p); max = Math.max(max, p); }
+  __m1.dispatch({ type: 'deck/loopExit', deck: 0 });
+  return { inSec: l.inSec, outSec: l.outSec, min, max };
+`);
+check('loop holds the playhead', loop.min >= loop.inSec - 0.02 && loop.max <= loop.outSec + 0.02, { ...loop, note: `${loop.inSec.toFixed(2)}–${loop.outSec.toFixed(2)} s, seen ${loop.min.toFixed(3)}–${loop.max.toFixed(3)} over 4 s` });
+
+// 7. tempo +10 %
+const tempo = await inPage(`
+  __m1.dispatch({ type: 'deck/tempo', deck: 0, value01: 1 });
+  await __m1.sleep(200);
+  const t0 = performance.now(); const p0 = __m1.deck().positionSec;
+  await __m1.sleep(5000);
+  const rate = (__m1.deck().positionSec - p0) / ((performance.now() - t0) / 1000);
+  __m1.dispatch({ type: 'deck/tempoReset', deck: 0 });
+  return rate;
+`);
+check('tempo slider changes the engine rate', Math.abs(tempo - 1.1) < 0.01, { rate: tempo, note: `+10 % slider → ${tempo.toFixed(4)}x` });
+
+// 8. CUE while playing: pause + jump back
+const cue = await inPage(`
+  __m1.dispatch({ type: 'deck/cue', deck: 0, pressed: true });
+  await __m1.sleep(250);
+  const d = __m1.deck();
+  __m1.dispatch({ type: 'deck/cue', deck: 0, pressed: false });
+  return { playing: d.playing, pos: d.positionSec, cue: d.cueSec };
+`);
+check('CUE stops and returns to the cue point', !cue.playing && Math.abs(cue.pos - cue.cue) < 0.02, { ...cue, note: `paused at ${cue.pos.toFixed(3)} s (cue ${cue.cue.toFixed(3)} s)` });
+
+// 9. scratch-follow: 20 jog ticks every 50 ms for a second (about 1x forward), then release
+const scratch = await inPage(`
+  __m1.dispatch({ type: 'deck/seek', deck: 0, positionSec: 40 });
+  __m1.dispatch({ type: 'deck/jogTouch', deck: 0, touched: true });
+  const start = __m1.deck().positionSec;
+  for (let i = 0; i < 20; i += 1) { __m1.dispatch({ type: 'deck/jog', deck: 0, mode: 'scratch', ticks: 20 }); await __m1.sleep(50); }
+  const target = __m1.deck().positionSec;
+  __m1.dispatch({ type: 'deck/jogTouch', deck: 0, touched: false });
+  await __m1.sleep(250);
+  return { start, target, landed: __m1.deck().positionSec };
+`);
+check('the jog scratches (engine follows the hand)', scratch.target > scratch.start + 0.5 && Math.abs(scratch.landed - scratch.target) < 0.12, { ...scratch, note: `hand moved ${(scratch.target - scratch.start).toFixed(3)} s, engine landed ${(scratch.landed - scratch.target) * 1000 > 0 ? '+' : ''}${((scratch.landed - scratch.target) * 1000).toFixed(0)} ms from it` });
+
+// 10. fader and crossfader through the real meters
+const mix = await inPage(`
+  __m1.dispatch({ type: 'deck/playPause', deck: 0 });
+  const peak = async () => { let m = 0; for (let i = 0; i < 12; i += 1) { await __m1.sleep(50); m = Math.max(m, rekordfox.meters.deck[0]); } return m; };
+  const master = async () => { let m = 0; for (let i = 0; i < 12; i += 1) { await __m1.sleep(50); m = Math.max(m, rekordfox.meters.master); } return m; };
+  const up = await peak();
+  __m1.dispatch({ type: 'mixer/set', ch: 0, param: 'fader', value: 0 });
+  await __m1.sleep(100);
+  const down = await peak();
+  __m1.dispatch({ type: 'mixer/set', ch: 0, param: 'fader', value: 1 });
+  __m1.dispatch({ type: 'mixer/crossfader', value: 1 });
+  await __m1.sleep(100);
+  const right = await master();
+  __m1.dispatch({ type: 'mixer/crossfader', value: 0 });
+  await __m1.sleep(100);
+  const left = await master();
+  __m1.dispatch({ type: 'deck/playPause', deck: 0 });
+  return { up, down, left, right, underruns: rekordfox.audio.status.underruns };
+`);
+check('channel fader gates the deck', mix.up > 0.05 && mix.down < 0.001, { note: `deck peak ${mix.up.toFixed(3)} with the fader up, ${mix.down.toFixed(4)} down` });
+check('crossfader hard right removes deck A from the master', mix.left > 0.02 && mix.right < 0.001, { note: `master peak ${mix.left.toFixed(3)} hard left, ${mix.right.toFixed(4)} hard right` });
+check('no underruns', mix.underruns === 0, { underruns: mix.underruns, note: `${mix.underruns} over the whole run` });
+
+const report = { at: new Date().toISOString(), seconds: SECONDS, status, results };
+const file = path.join(root, 'docs', `m1-check-${report.at.slice(0, 10)}.json`);
+writeFileSync(file, JSON.stringify(report, null, 2));
+console.log(`\nreport: ${path.relative(root, file)}`);
+
+const failed = Object.values(results).filter((r) => !r.ok).length;
+console.log(failed === 0 ? 'M1 check passed' : `${failed} M1 check(s) FAILED`);
+ws.close();
+electron.kill();
+await exitCode();
+process.exit(failed === 0 ? 0 : 1);

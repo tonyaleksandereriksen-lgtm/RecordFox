@@ -4,10 +4,13 @@
  * audio and folder-picker permissions, and lifts the autoplay gesture requirement.
  *
  * The FLX2 control path stays Web MIDI inside Chromium (WinMM on Windows, CoreMIDI on macOS).
+ * The audio engine is native and lives here, in the main process (see audio.cjs); the renderer
+ * talks to it over IPC through the preload bridge.
  */
 const { app, BrowserWindow, net, protocol, session, shell } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+const audio = require('./audio.cjs');
 
 const DEV_URL = process.env.REKORDFOX_DEV_URL; // e.g. http://localhost:5173 (see scripts/app-dev.mjs)
 const DIST = path.join(__dirname, '..', 'dist');
@@ -60,6 +63,18 @@ function insideDist(file) {
   return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
+// The audio engine must stop before the process goes: a load may still be decoding.
+let quitting = false;
+app.on('before-quit', (e) => {
+  if (quitting) return;
+  quitting = true;
+  e.preventDefault();
+  audio.stopAudio().finally(() => {
+    audio.shutdownSync();
+    app.quit();
+  });
+});
+
 app.on('second-instance', () => {
   if (!mainWindow) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
@@ -89,6 +104,7 @@ app.whenReady().then(() => {
   ses.setPermissionCheckHandler((_wc, permission) => ALLOWED.has(permission) || permission === 'media');
   ses.setDevicePermissionHandler?.(() => false); // no WebHID/WebUSB/serial: the FLX2 is MIDI-only
 
+  audio.registerAudio(() => mainWindow);
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

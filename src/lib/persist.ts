@@ -3,13 +3,15 @@
  * localStorage for now — the slice-2 library moves this to IndexedDB (browser) / files (desktop).
  * Every access is guarded: storage can be unavailable (private window, blocked site data).
  */
-import type { EngineState, Prefs, TrackEdits } from '../engine/types.ts';
+import type { EngineState, Prefs, Track, TrackEdits } from '../engine/types.ts';
 
 const KEY = 'rekordfox.state.v1';
 
 export interface Saved {
   prefs?: Partial<Prefs>;
   tracks?: Record<string, TrackEdits>;
+  /** Local files added to the library (M1); the M2 library store replaces this. */
+  local?: Track[];
 }
 
 type StorageLike = Pick<Storage, 'getItem' | 'setItem'>;
@@ -36,7 +38,17 @@ export function snapshot(s: EngineState): Saved {
     }
     tracks[t.id] = edits;
   }
-  return { prefs: s.prefs, tracks };
+  const local = s.library.tracks.filter((t) => t.source === 'local' && typeof t.path === 'string');
+  return local.length ? { prefs: s.prefs, tracks, local } : { prefs: s.prefs, tracks };
+}
+
+/** Local tracks from a saved snapshot, keeping only records that still look like tracks. */
+export function savedLocalTracks(saved: Saved): Track[] {
+  if (!Array.isArray(saved.local)) return [];
+  return saved.local.filter(
+    (t): t is Track =>
+      !!t && typeof t === 'object' && typeof t.id === 'string' && typeof t.path === 'string' && typeof t.title === 'string' && typeof t.durationSec === 'number' && t.source === 'local',
+  );
 }
 
 export function save(s: EngineState, storage: StorageLike | undefined = globalThis.localStorage): boolean {
@@ -58,5 +70,6 @@ export function mergePrefs(base: Prefs, saved: Partial<Prefs> | undefined): Pref
   if (typeof saved.needleLock === 'boolean') out.needleLock = saved.needleLock;
   if (saved.faderStart && ['smart', 'always', 'off'].includes(saved.faderStart)) out.faderStart = saved.faderStart;
   if (typeof saved.statusDump === 'boolean') out.statusDump = saved.statusDump;
+  if (saved.audioDevice === null || typeof saved.audioDevice === 'string') out.audioDevice = saved.audioDevice;
   return out;
 }

@@ -8,6 +8,7 @@ export const DEFAULT_PREFS: Prefs = {
   needleLock: true,
   faderStart: 'smart',
   statusDump: true,
+  audioDevice: null,
 };
 
 export function initialDeck(prefs: Prefs = DEFAULT_PREFS): DeckState {

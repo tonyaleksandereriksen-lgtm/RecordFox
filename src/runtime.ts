@@ -1,13 +1,18 @@
 /**
  * Runtime wiring: one engine store, one FLX2 driver, bindings between them, the LED writer,
- * the on-screen virtual unit, persistence and the (slice-1) transport clock. The UI imports from here.
+ * the on-screen virtual unit, persistence, and the two clocks: the native audio engine (through
+ * the bridge, desktop app only) for the decks it holds, the animation frame for everything else.
+ * The UI imports from here.
  */
 import { probeFlx2Audio, type AudioProbe } from './audio/devices.ts';
+import { EngineBridge } from './audio/engineBridge.ts';
+import { meters } from './audio/meters.ts';
+import { audioHost, type AudioStatus } from './audio/host.ts';
 import type { EngineAction } from './engine/actions.ts';
 import { DEFAULT_PREFS, initialState } from './engine/initialState.ts';
 import { reduce } from './engine/reducer.ts';
 import type { EngineState } from './engine/types.ts';
-import { loadSaved, mergePrefs, save } from './lib/persist.ts';
+import { loadSaved, mergePrefs, save, savedLocalTracks } from './lib/persist.ts';
 import { createStore } from './lib/store.ts';
 import { Bindings } from './midi/bindings.ts';
 import { OUT } from './midi/flx2Map.ts';
@@ -17,20 +22,33 @@ import type { DeckIndex } from './midi/types.ts';
 import { VirtualFlx2 } from './midi/virtualFlx2.ts';
 
 const saved = loadSaved();
-const boot = initialState(mergePrefs(DEFAULT_PREFS, saved.prefs));
-export const store = createStore<EngineState, EngineAction>(saved.tracks ? reduce(boot, { type: 'library/hydrate', edits: saved.tracks }) : boot, reduce);
+const local = savedLocalTracks(saved);
+let boot = initialState(mergePrefs(DEFAULT_PREFS, saved.prefs));
+if (local.length) boot = reduce(boot, { type: 'library/add', tracks: local });
+if (saved.tracks) boot = reduce(boot, { type: 'library/hydrate', edits: saved.tracks });
+export const store = createStore<EngineState, EngineAction>(boot, reduce);
 export const midi = new Flx2Midi();
 export const bindings = new Bindings(store);
 export const virtualUnit = new VirtualFlx2();
 
 interface HostState {
   isElectron: boolean;
-  audio: AudioProbe;
+  /** The browser's view of audio outputs (the audit's spike); informational only. */
+  probe: AudioProbe;
+  /** The native engine. */
+  audio: AudioStatus;
 }
+const hostAudio = audioHost();
 export const host = createStore<HostState, Partial<HostState>>(
-  { isElectron: !!(globalThis as { rekordfoxHost?: { isElectron?: boolean } }).rekordfoxHost?.isElectron, audio: { state: 'unknown' } },
+  {
+    isElectron: !!(globalThis as { rekordfoxHost?: { isElectron?: boolean } }).rekordfoxHost?.isElectron,
+    probe: { state: 'unknown' },
+    audio: hostAudio ? { state: 'idle' } : { state: 'unavailable', reason: 'Audio needs the desktop app (start-desktop.bat): the browser build has no audio engine.' },
+  },
   (s, patch) => ({ ...s, ...patch }),
 );
+/** The audio bridge, when the desktop shell exposes the engine. */
+export const audio: EngineBridge | null = hostAudio ? new EngineBridge(store, hostAudio, (status) => host.dispatch({ audio: status })) : null;
 
 /** Writes only changed LEDs; a (re)connect clears the cache so the next frame writes everything. */
 class LedWriter {
@@ -88,11 +106,13 @@ export function startRuntime(): void {
   if (started) return;
   started = true;
 
-  // Slice-1 transport clock. The audio engine becomes the clock in slice 2.
+  // The frame clock: advances decks the engine does not hold, then exchanges one IPC round trip
+  // with the engine (commands out, playheads back) for the decks it does.
   let last = performance.now();
   const frame = (now: number) => {
     store.dispatch({ type: 'transport/tick', dt: (now - last) / 1000 });
     last = now;
+    audio?.frame();
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
@@ -115,13 +135,21 @@ export function startRuntime(): void {
     save(store.getState());
     leds.blackout();
     midi.dispose();
+    void audio?.stop();
   });
 
-  const refreshAudio = () => void probeFlx2Audio().then((audio) => host.dispatch({ audio })).catch(() => host.dispatch({ audio: { state: 'unsupported' } }));
-  refreshAudio();
-  navigator.mediaDevices?.addEventListener?.('devicechange', refreshAudio);
+  const refreshProbe = () => void probeFlx2Audio().then((probe) => host.dispatch({ probe })).catch(() => host.dispatch({ probe: { state: 'unsupported' } }));
+  refreshProbe();
+  navigator.mediaDevices?.addEventListener?.('devicechange', refreshProbe);
 
+  void audio?.start(store.getState().prefs.audioDevice);
   void autoConnect();
+}
+
+/** Settings › Audio: reopen the engine on another output (null = automatic). */
+export function restartAudio(device: string | null): void {
+  store.dispatch({ type: 'prefs/set', patch: { audioDevice: device } });
+  void audio?.start(device);
 }
 
 /** Electron: connect straight away (permissions are granted by the main process).
@@ -155,4 +183,4 @@ export function setVirtualAttached(on: boolean): void {
 }
 
 /** For debugging from DevTools: window.rekordfox.store.getState() */
-(globalThis as Record<string, unknown>).rekordfox = { store, midi, bindings, virtualUnit };
+(globalThis as Record<string, unknown>).rekordfox = { store, midi, bindings, virtualUnit, audio, meters };

@@ -8,7 +8,7 @@ import { Preferences } from './Preferences.tsx';
 
 const SECTIONS: { id: SettingsSection; label: string; icon: IconName }[] = [
   { id: 'controller', label: 'Controller', icon: 'midi' },
-  { id: 'audio', label: 'Audio check', icon: 'speaker' },
+  { id: 'audio', label: 'Audio', icon: 'speaker' },
   { id: 'preferences', label: 'Preferences', icon: 'sliders' },
   { id: 'about', label: 'About', icon: 'info' },
 ];

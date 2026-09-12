@@ -158,6 +158,8 @@ export interface Prefs {
   faderStart: FaderStartMode;
   /** Electron only: ask the unit for its knob/fader positions at connect (optional SysEx). */
   statusDump: boolean;
+  /** Output device name for the native engine; null = the DDJ-FLX2 if present, else the default output. */
+  audioDevice: string | null;
 }
 
 export interface Toast {

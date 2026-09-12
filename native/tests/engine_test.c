@@ -206,6 +206,117 @@ int rfx_engine_test_main(const char* dir)
     }
     rfx_deck_set_scratch(0, 0, 0.0);
 
+    /* --- scratch follow: the jog path the app uses ---------------------- */
+    /* The UI reports where the hand has put the playhead once per frame; the engine has to turn
+       those steps into a motion that sounds continuous. Here a "frame" is two 10 ms blocks. */
+    rfx_deck_play(0, 0);
+    rfx_deck_seek(0, 2.0);
+    rfx_deck_scratch_to(0, 1, 2.0);   /* touch: the hand is where the playhead is */
+    {
+        const double speed = 0.75;
+        const double want = speed * (double)BLK / (double)RATE;   /* seconds per block */
+        double hand = 2.0;
+        double minStep = 1e9, maxStep = -1e9;
+        int b;
+        for (b = 0; b < 120; b += 1) {                  /* 1.2 s */
+            double before;
+            if (b % 2 == 0) {
+                hand += speed * 2.0 * (double)BLK / (double)RATE;
+                rfx_deck_scratch_to(0, 1, hand);
+            }
+            before = rfx_deck_position(0);
+            rfx_engine_render(buf, BLK, CH, RATE);
+            if (b >= 40) {                              /* after the speed estimate has settled */
+                double moved = rfx_deck_position(0) - before;
+                if (moved < minStep) minStep = moved;
+                if (moved > maxStep) maxStep = moved;
+            }
+        }
+        printf("     steady hand at 0.75x: playhead moves %.5f..%.5f s per block (want %.5f)\n", minStep, maxStep, want);
+        check(maxStep - minStep < want * 0.02, "a steady hand gives a steady speed (ripple under 2%)");
+        check(fabs((minStep + maxStep) * 0.5 - want) < want * 0.02, "the playhead moves at the hand's speed");
+        /* The last report is two blocks old, so the hand is expected to have moved on by two blocks. */
+        printf("     playhead %.4f s, hand %.4f s (+%.4f s since its last report)\n", rfx_deck_position(0), hand, 2.0 * want);
+        check(fabs(rfx_deck_position(0) - (hand + 2.0 * want)) < 0.005, "the playhead stays with the hand (no drift)");
+
+        /* The hand stops: the same target keeps arriving. */
+        for (b = 0; b < 30; b += 1) {                   /* 0.3 s */
+            if (b % 2 == 0) rfx_deck_scratch_to(0, 1, hand);
+            rfx_engine_render(buf, BLK, CH, RATE);
+        }
+        {
+            double before = rfx_deck_position(0);
+            rfx_deck_scratch_to(0, 1, hand);
+            rfx_engine_render(buf, BLK, CH, RATE);
+            printf("     hand stopped: playhead %.4f s, hand %.4f s, %.6f s per block\n", rfx_deck_position(0), hand, rfx_deck_position(0) - before);
+            check(fabs(rfx_deck_position(0) - before) < 0.0002, "a still hand stops the playhead within 0.3 s");
+            check(fabs(rfx_deck_position(0) - hand) < 0.01, "and it comes to rest at the hand's position");
+        }
+
+        /* Pulling back plays backwards, audibly. */
+        {
+            double start = rfx_deck_position(0);
+            double peak = 0.0;
+            unsigned int i;
+            for (b = 0; b < 40; b += 1) {               /* 0.4 s at -0.5x */
+                if (b % 2 == 0) {
+                    hand -= 0.5 * 2.0 * (double)BLK / (double)RATE;
+                    rfx_deck_scratch_to(0, 1, hand);
+                }
+                rfx_engine_render(buf, BLK, CH, RATE);
+                for (i = 0; i < BLK; i += 1) if (fabs((double)buf[i * CH]) > peak) peak = fabs((double)buf[i * CH]);
+            }
+            printf("     pulled back 0.2 s: playhead %.4f -> %.4f s, peak %.3f\n", start, rfx_deck_position(0), peak);
+            check(rfx_deck_position(0) < start - 0.15, "a hand pulling back plays backwards");
+            check(peak > 0.2, "and it still makes sound");
+        }
+
+        /* A hot cue jump while the hand is down must not read as a fast scratch. */
+        {
+            double moved;
+            rfx_deck_seek(0, 1.0);
+            hand = 1.0;
+            rfx_deck_scratch_to(0, 1, hand);
+            rfx_engine_render(buf, BLK, CH, RATE);
+            moved = rfx_deck_position(0) - 1.0;
+            printf("     jump to 1.0 s under the hand: playhead %.4f s\n", rfx_deck_position(0));
+            check(fabs(moved) < 0.002, "a seek under a still hand does not lurch");
+        }
+
+        /* Targets stop arriving mid-motion (a stalled UI): coast to rest, never run away. */
+        for (b = 0; b < 20; b += 1) {
+            if (b % 2 == 0) {
+                hand += 1.0 * 2.0 * (double)BLK / (double)RATE;
+                rfx_deck_scratch_to(0, 1, hand);
+            }
+            rfx_engine_render(buf, BLK, CH, RATE);
+        }
+        render_peak(0.6, 0, CH);
+        {
+            double before = rfx_deck_position(0);
+            rfx_engine_render(buf, BLK, CH, RATE);
+            printf("     no targets for 0.6 s: playhead %.4f s, last hand %.4f s\n", rfx_deck_position(0), hand);
+            check(fabs(rfx_deck_position(0) - before) < 0.0002, "without targets the playhead coasts to rest");
+            check(rfx_deck_position(0) < hand + 0.25, "and it does not run away");
+        }
+    }
+    rfx_deck_scratch_to(0, 0, 0.0);
+    {
+        double held = rfx_deck_position(0);
+        render_peak(0.1, 0, CH);
+        check(fabs(rfx_deck_position(0) - held) < 1e-9, "letting go of a paused deck leaves it where the hand left it");
+    }
+
+    /* --- probing files without loading them ------------------------------- */
+    {
+        double len = 0.0;
+        int sr = 0, ch = 0;
+        check(rfx_probe_file(sine44, &len, &sr, &ch) == 0, "probes a file without loading it");
+        printf("     probe: %.3f s, %d Hz, %d ch\n", len, sr, ch);
+        check(fabs(len - 2.0) < 0.01 && sr == 44100 && ch == 2, "the probe reports the file's own duration, rate and channels");
+        check(rfx_probe_file("/no/such/file.wav", &len, &sr, &ch) != 0, "probing a missing file fails cleanly");
+    }
+
     /* --- looping -------------------------------------------------------- */
     rfx_deck_set_loop(0, 1.0, 1.5, 1);
     rfx_deck_seek(0, 1.4);

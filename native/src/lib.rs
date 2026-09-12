@@ -45,9 +45,11 @@ pub mod sys {
         pub fn rfx_deck_position(deck: c_int) -> c_double;
         pub fn rfx_deck_set_rate(deck: c_int, rate: c_double);
         pub fn rfx_deck_set_scratch(deck: c_int, on: c_int, rate: c_double);
+        pub fn rfx_deck_scratch_to(deck: c_int, on: c_int, target_seconds: c_double);
         pub fn rfx_deck_set_loop(deck: c_int, in_seconds: c_double, out_seconds: c_double, active: c_int);
         pub fn rfx_deck_set_channel(deck: c_int, trim: c_double, eq_hi: c_double, eq_mid: c_double, eq_low: c_double, cfx: c_double, fader: c_double, pfl: c_int);
         pub fn rfx_engine_set_master(crossfader: c_double, master: c_double, phones: c_double, phones_mix: c_double, master_cue: c_int);
+        pub fn rfx_probe_file(path: *const c_char, length_seconds: *mut c_double, sample_rate: *mut c_int, channels: *mut c_int) -> c_int;
         pub fn rfx_deck_peak(deck: c_int) -> c_double;
         pub fn rfx_engine_master_peak() -> c_double;
         pub fn rfx_engine_frames_rendered() -> u64;

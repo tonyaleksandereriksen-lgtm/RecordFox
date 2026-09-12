@@ -45,11 +45,21 @@ double rfx_deck_position(int deck);
 void   rfx_deck_set_rate(int deck, double rate);
 /* While on, this rate replaces the tempo rate — that is what a jog touch does. */
 void   rfx_deck_set_scratch(int deck, int on, double rate);
+/* Scratch by following the hand instead: the control side sends where the platter has put the
+   playhead (once per UI frame is enough). The engine measures the hand's speed between targets on
+   its own clock, smooths it, and pulls gently toward the target so nothing drifts — so a target
+   that only changes 60 times a second still sounds like a continuous motion. `on` = 0 leaves it. */
+void   rfx_deck_scratch_to(int deck, int on, double targetSeconds);
 void   rfx_deck_set_loop(int deck, double inSeconds, double outSeconds, int active);
 
 /* --- mixer (all positions 0..1, exactly as the UI and the FLX2 send them) */
 void   rfx_deck_set_channel(int deck, double trim, double eqHi, double eqMid, double eqLow, double cfx, double fader, int pfl);
 void   rfx_engine_set_master(double crossfader, double masterLevel, double phonesLevel, double phonesMix, int masterCue);
+
+/* --- files -------------------------------------------------------------- */
+/* Reads a file's headers without decoding it: duration, native rate and channels. 0 = ok.
+   Works before the engine is started, so the library can probe files at any time. */
+int    rfx_probe_file(const char* path, double* lengthSeconds, int* sampleRate, int* channels);
 
 /* --- meters and health -------------------------------------------------- */
 /* Peak since the last call, then cleared. */

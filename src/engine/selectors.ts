@@ -13,8 +13,15 @@ export const BEATLOOP_SIZES = [1 / 4, 1 / 2, 1, 2, 4, 8, 16, 32] as const;
 export const BEATJUMP_SIZES = [1, 2, 4, 8, 16, 32] as const;
 export const TEMPO_RANGES = [6, 10, 16] as const;
 
+/** BPM used for grid features (quantize, loops, beat jump): the analysed value, or 120 until analysed. */
+export const UNANALYSED_BPM = 120;
+
+export function gridBpm(track: Track): number {
+  return track.bpm > 0 ? track.bpm : UNANALYSED_BPM;
+}
+
 export function beatLen(track: Track): number {
-  return 60 / track.bpm;
+  return 60 / gridBpm(track);
 }
 
 export function tempoPct(d: DeckState): number {
@@ -50,7 +57,7 @@ export function syncMultiplier(trackBpm: number, masterBpm: number): number {
 export function baseRate(s: EngineState, deck: DeckIndex): number {
   const d = s.decks[deck];
   if (!d.track) return 1;
-  if (d.sync && !d.master) {
+  if (d.sync && !d.master && d.track.bpm > 0) {
     const m = masterDeckIndex(s);
     if (m !== null && m !== deck) {
       const mb = ownBpm(s.decks[m]);

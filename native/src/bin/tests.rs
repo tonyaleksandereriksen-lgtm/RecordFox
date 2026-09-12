@@ -1,4 +1,4 @@
-//! Runs the C test suites (DSP, device shim, engine) with one command:
+//! Runs the C test suites (DSP, device shim, engine, analysis) with one command:
 //!     cargo run --release --bin rfx-tests
 //! They need no sound card: the shim uses miniaudio's null backend and the engine test writes its
 //! own WAV fixtures into a scratch folder and deletes them afterwards.
@@ -17,6 +17,8 @@ fn main() {
     failures += unsafe { rfx_shim_test_main() };
     println!("\n== engine ==  (fixtures in {dir})");
     failures += unsafe { rfx_engine_test_main(c_dir.as_ptr()) };
+    println!("\n== analysis ==");
+    failures += unsafe { rfx_analyze_test_main() };
 
     println!();
     if failures == 0 {

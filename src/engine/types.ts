@@ -19,7 +19,11 @@ export interface Track {
   /** Camelot notation, e.g. "8A". */
   key: string;
   durationSec: number;
+  /** First downbeat of the beat grid, in seconds. With `bpm` this is the whole grid. */
   firstBeatSec: number;
+  /** What analysis said before the grid was corrected by hand; absent while the grid is untouched. */
+  bpmOriginal?: number;
+  firstBeatSecOriginal?: number;
   /** Artwork hue (demo artwork is generated). */
   hue: number;
   /** Seed for generated artwork and the demo waveform. Real analysis replaces the waveform in slice 2. */
@@ -73,6 +77,8 @@ export interface DeckState {
   /** Slip mode: scratches, loops and momentary hot cues return to where the track would have been. */
   slip: boolean;
   slipPos: number | null;
+  /** Clock times of recent taps while setting the BPM by ear (tap tempo). */
+  gridTaps: number[];
   loop: LoopState;
   beatJumpBeats: number;
   padMode: PadMode;
@@ -150,6 +156,8 @@ export interface UiState {
   view: View;
   bottomTab: BottomTab;
   settingsSection: SettingsSection;
+  /** Deck whose beat grid is being edited (its bar lines turn red), or null. */
+  gridDeck: DeckIndex | null;
   /** Seconds visible each side of the playhead in the scrolling waveform. */
   zoomSec: number;
   toast: Toast | null;
@@ -172,4 +180,7 @@ export interface TrackEdits {
   comment?: string;
   playlists?: string[];
   cues?: (number | null)[];
+  /** Only written once the grid has been corrected by hand. */
+  bpm?: number;
+  firstBeatSec?: number;
 }

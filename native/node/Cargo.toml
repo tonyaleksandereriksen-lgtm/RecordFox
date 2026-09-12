@@ -1,0 +1,19 @@
+[package]
+name = "rfx-node"
+version = "0.1.0"
+edition = "2021"
+description = "RekordFox native audio as a Node-API addon (loaded by Electron's main process)"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+rfx-native = { path = ".." }
+napi = { version = "3", default-features = false, features = ["napi8"] }
+napi-derive = "3"
+
+[build-dependencies]
+napi-build = "2"

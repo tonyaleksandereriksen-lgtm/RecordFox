@@ -4,4 +4,5 @@
 int rfx_dsp_test_main(void);
 int rfx_engine_test_main(const char* scratchDir);
 int rfx_shim_test_main(void);
+int rfx_analyze_test_main(void);
 #endif

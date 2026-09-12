@@ -7,6 +7,7 @@ import { tokens } from '../../theme/tokens.ts';
 import { useEngine, useRaf } from '../hooks.ts';
 import { ScrollWave } from '../waveform/Overview.tsx';
 import { TRACK_MIME, deckLetter } from './Deck.tsx';
+import { GridPanel } from './GridPanel.tsx';
 import { dispatch } from '../hooks.ts';
 
 /**
@@ -15,6 +16,8 @@ import { dispatch } from '../hooks.ts';
  */
 export function WaveLane({ deck }: { deck: DeckIndex }) {
   const hasTrack = useEngine((s) => s.decks[deck].track !== null);
+  const gridEdit = useEngine((s) => s.ui.gridDeck === deck);
+  const gridMoved = useEngine((s) => s.decks[deck].track?.bpmOriginal !== undefined);
   const barsRef = useRef<HTMLSpanElement>(null);
 
   useRaf(() => {
@@ -48,7 +51,18 @@ export function WaveLane({ deck }: { deck: DeckIndex }) {
       <span className="lane-badge" aria-hidden="true">
         {deckLetter(deck)}
       </span>
+      {hasTrack && (
+        <button
+          className={`lane-grid-btn${gridEdit ? ' on' : ''}${gridMoved ? ' edited' : ''}`}
+          onClick={() => dispatch({ type: 'ui/gridDeck', deck: gridEdit ? null : deck })}
+          aria-pressed={gridEdit}
+          title={gridEdit ? 'Close the beat-grid editor' : 'Edit the beat grid (downbeat, nudge, BPM, tap)'}
+        >
+          Grid
+        </button>
+      )}
       <span className="lane-bars mono" ref={barsRef} />
+      {gridEdit && <GridPanel deck={deck} />}
     </div>
   );
 }

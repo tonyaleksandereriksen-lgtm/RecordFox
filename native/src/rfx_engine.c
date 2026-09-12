@@ -29,6 +29,9 @@ typedef struct {
     volatile rfx_u32 scratching;
     volatile double  rate;           /* tempo rate */
     volatile double  scratchRate;
+    volatile rfx_u32 scratchFollow;  /* 1 = follow scratchTarget, 0 = play at scratchRate */
+    volatile rfx_u64 scratchTargetBits;  /* where the hand has put the playhead, frames as a double */
+    volatile rfx_u32 scratchSeq;     /* bumped per target update */
     volatile double  trim, eqHi, eqMid, eqLow, cfx, fader;
     volatile rfx_u32 pfl;
     volatile rfx_u64 loopInBits, loopOutBits;   /* frames, as doubles */
@@ -38,6 +41,12 @@ typedef struct {
     double    pos;                   /* playhead in frames */
     rfx_u32   seenSeekSeq;
     rfx_u32   seenSlot;
+    rfx_u32   seenScratchSeq;
+    int       followAnchored;        /* a target has been seen since scratch-follow began */
+    double    followVel;             /* the hand's speed, frames per frame, smoothed */
+    double    followAnchor;          /* the last target, frames */
+    rfx_u64   followAnchorAt;        /* g_framesRendered when it arrived */
+    double    followSince;           /* frames rendered since then (extrapolates the hand) */
     rfx_eq3   eq;
     rfx_cfx   filter;
     double    cfxKnobApplied;
@@ -60,6 +69,17 @@ static volatile rfx_u32 g_masterCue = 0;
 static volatile rfx_u64 g_masterPeakBits = 0;
 static volatile rfx_u64 g_framesRendered = 0;
 static volatile rfx_u32 g_underruns = 0;
+
+/* Scratch-follow tuning. SMOOTH is the share of a new speed estimate taken per target update
+ * (0.45 = about two UI frames of lag; the jog's tick quantisation comes through at ~4 %). PULL_SEC
+ * is the time constant of the pull toward the extrapolated hand position: short enough that the
+ * overshoot after a stop (at most one report interval of audio) is back within ~0.1 s, long
+ * enough that a noisy speed estimate does not turn into a wobble. HOLD_SEC is how long the
+ * playhead keeps its last speed when targets stop arriving (a stalled UI) before coasting to rest. */
+#define RFX_SCRATCH_SMOOTH   0.45
+#define RFX_SCRATCH_PULL_SEC 0.04
+#define RFX_SCRATCH_HOLD_SEC 0.15
+#define RFX_SCRATCH_MAX_VEL  8.0
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -278,7 +298,20 @@ void rfx_deck_set_scratch(int deck, int on, double rate)
     rfx_deck* k;
     if (!valid_deck(deck)) return;
     k = &g_deck[deck];
-    k->scratchRate = clampd(rate, -8.0, 8.0);
+    k->scratchRate = clampd(rate, -RFX_SCRATCH_MAX_VEL, RFX_SCRATCH_MAX_VEL);
+    rfx_store_u32(&k->scratchFollow, 0u);
+    rfx_store_u32(&k->scratching, on ? 1u : 0u);
+}
+
+void rfx_deck_scratch_to(int deck, int on, double targetSeconds)
+{
+    rfx_deck* k;
+    if (!valid_deck(deck)) return;
+    k = &g_deck[deck];
+    if (targetSeconds < 0.0) targetSeconds = 0.0;
+    rfx_store_f64(&k->scratchTargetBits, targetSeconds * (double)g_rate);
+    rfx_store_u32(&k->scratchSeq, rfx_load_u32(&k->scratchSeq) + 1);
+    rfx_store_u32(&k->scratchFollow, on ? 1u : 0u);
     rfx_store_u32(&k->scratching, on ? 1u : 0u);
 }
 
@@ -316,6 +349,32 @@ void rfx_engine_set_master(double crossfader, double masterLevel, double phonesL
     g_phonesLevel = clampd(phonesLevel, 0.0, 1.0);
     g_phonesMix   = clampd(phonesMix, 0.0, 1.0);
     rfx_store_u32(&g_masterCue, masterCue ? 1u : 0u);
+}
+
+/* ----------------------------------------------------------------- files */
+
+int rfx_probe_file(const char* path, double* lengthSeconds, int* sampleRate, int* channels)
+{
+    ma_decoder dec;
+    ma_result  r;
+    ma_uint64  length = 0;
+
+    if (lengthSeconds) *lengthSeconds = 0.0;
+    if (sampleRate)    *sampleRate = 0;
+    if (channels)      *channels = 0;
+    if (path == NULL || path[0] == 0) { set_engine_err("no file given", MA_SUCCESS); return 2; }
+
+    /* No config: keep the file's own format so the numbers describe the file, not the engine. */
+    r = ma_decoder_init_file(path, NULL, &dec);
+    if (r != MA_SUCCESS) { set_engine_err("could not open the audio file", r); return 3; }
+    if (ma_decoder_get_length_in_pcm_frames(&dec, &length) != MA_SUCCESS) length = 0;
+    if (sampleRate) *sampleRate = (int)dec.outputSampleRate;
+    if (channels)   *channels = (int)dec.outputChannels;
+    if (lengthSeconds && dec.outputSampleRate > 0) *lengthSeconds = (double)length / (double)dec.outputSampleRate;
+    ma_decoder_uninit(&dec);
+    if (length == 0) { set_engine_err("the file has no readable audio", MA_SUCCESS); return 5; }
+    g_engineErr[0] = 0;
+    return 0;
 }
 
 /* ---------------------------------------------------------------- meters */
@@ -390,10 +449,48 @@ void rfx_engine_render(float* out, unsigned int frames, unsigned int channels, u
         if (seq != k->seenSeekSeq) {
             k->seenSeekSeq = seq;
             k->pos = rfx_load_f64(&k->seekPosBits);
+            /* A jump while the hand is on the platter (a hot cue, say) must not read as a fast scratch. */
+            k->followAnchor = k->pos;
+            k->followAnchorAt = rfx_load_u64(&g_framesRendered);
+            k->followSince = 0.0;
+            k->followVel = 0.0;
         }
         if (knob != k->cfxKnobApplied) {
             rfx_cfx_set(&k->filter, knob);
             k->cfxKnobApplied = knob;
+        }
+
+        /* Scratch-follow: a new target gives a new speed estimate on the audio clock. */
+        if (rfx_load_u32(&k->scratching) && rfx_load_u32(&k->scratchFollow)) {
+            rfx_u32 sseq = rfx_load_u32(&k->scratchSeq);
+            if (sseq != k->seenScratchSeq) {
+                double  target = rfx_load_f64(&k->scratchTargetBits);
+                rfx_u64 now = rfx_load_u64(&g_framesRendered);
+                k->seenScratchSeq = sseq;
+                if (k->followAnchored) {
+                    double dt = (double)(now - k->followAnchorAt);
+                    double v;
+                    if (dt < 1.0) dt = 1.0;
+                    v = clampd((target - k->followAnchor) / dt, -RFX_SCRATCH_MAX_VEL, RFX_SCRATCH_MAX_VEL);
+                    /* No movement at all since the last report is unambiguous (the jog sends whole
+                     * ticks): the hand has stopped, so stop now instead of coasting past it. */
+                    if (fabs(target - k->followAnchor) < 0.5) k->followVel = 0.0;
+                    else k->followVel += (v - k->followVel) * RFX_SCRATCH_SMOOTH;
+                } else {
+                    /* First target since the touch: start from rest at the hand's position. */
+                    k->followAnchored = 1;
+                    k->followVel = 0.0;
+                }
+                k->followAnchor = target;
+                k->followAnchorAt = now;
+                k->followSince = 0.0;
+            } else if (k->followSince > RFX_SCRATCH_HOLD_SEC * (double)g_rate) {
+                /* Targets stopped coming (the UI stalled): coast to rest rather than run away. */
+                k->followVel *= exp(-(double)frames / (RFX_SCRATCH_PULL_SEC * (double)g_rate));
+            }
+        } else {
+            k->followAnchored = 0;
+            k->followVel = 0.0;
         }
     }
 
@@ -441,7 +538,20 @@ void rfx_engine_render(float* out, unsigned int frames, unsigned int channels, u
             if (peak > rfx_load_f64(&k->peakBits)) rfx_store_f64(&k->peakBits, peak);
 
             /* --- advance the playhead ------------------------------- */
-            step = rfx_load_u32(&k->scratching) ? k->scratchRate : (rfx_load_u32(&k->playing) ? k->rate : 0.0);
+            if (rfx_load_u32(&k->scratching)) {
+                if (rfx_load_u32(&k->scratchFollow)) {
+                    /* Move at the hand's speed; pull toward where the hand is *now* (the last target
+                     * extrapolated by that speed), so the pull corrects drift without adding a
+                     * frame-rate sawtooth of its own. */
+                    double predicted = k->followAnchor + k->followVel * k->followSince;
+                    step = k->followVel + (predicted - k->pos) / (RFX_SCRATCH_PULL_SEC * (double)g_rate);
+                    k->followSince += 1.0;
+                } else {
+                    step = k->scratchRate;
+                }
+            } else {
+                step = rfx_load_u32(&k->playing) ? k->rate : 0.0;
+            }
             if (step != 0.0) {
                 double newPos = k->pos + step;
                 if (rfx_load_u32(&k->loopActive)) {

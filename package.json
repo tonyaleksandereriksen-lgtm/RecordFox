@@ -15,7 +15,9 @@
     "app:dev": "node scripts/app-dev.mjs",
     "test": "node --test \"tests/**/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "docs:midi": "node scripts/gen-midi-doc.ts"
+    "docs:midi": "node scripts/gen-midi-doc.ts",
+    "native": "node scripts/build-native.mjs",
+    "native:smoke": "electron scripts/native-smoke.cjs"
   },
   "dependencies": {
     "react": "^19.2.0",

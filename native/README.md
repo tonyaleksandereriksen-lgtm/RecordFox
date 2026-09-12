@@ -14,7 +14,8 @@ So the engine lives here now:
 | Program | What it does |
 |---|---|
 | `run-demo.bat` | Plays your own tracks through the FLX2 with the real engine: tempo, EQ kill, filter sweep, crossfade, headphone cue, scratch, loop. Drag one or two audio files onto it. |
-| `run-tests.bat` | Runs the native checks (DSP, device shim, engine). No sound card needed. |
+| `run-analyze.bat` | Analyses your own tracks the way the library will on import — BPM, downbeat, key, waveform — and writes `analysis.json`. Drag a file or a folder onto it. No sound card needed. |
+| `run-tests.bat` | Runs the native checks (DSP, device shim, engine, analysis). No sound card needed. |
 | `run-probe.bat` | The latency/channel probe, if you want to re-measure (after a driver change, or on another machine). |
 
 ## What you need (one time)
@@ -70,9 +71,12 @@ src/rfx_audio.c/.h   device shim over miniaudio: a flat C ABI of plain functions
 src/rfx_dsp.c/.h     the DSP blocks: Linkwitz-Riley isolator EQ, Sound Color FX filter, fader laws, interpolator
 src/rfx_engine.c/.h  the engine: two decks reading from RAM, channel strips, crossfader, cue bus, 4-channel out
 src/rfx_atomic.h     the few atomics the engine needs, without requiring C11 atomics from MSVC
+src/rfx_fft.c/.h     radix-2 FFT, the only transform the analyser needs
+src/rfx_analyze.c/.h offline analysis: BPM, downbeat, key in Camelot, 3-band waveform
 src/lib.rs           Rust bindings to all of the above
 src/main.rs          rfx-probe: device list, open attempts, callback timing, tone test, JSON report
 src/bin/demo.rs      rfx-demo: the scripted hardware demo
+src/bin/analyze.rs   rfx-analyze: the analysis CLI
 src/bin/tests.rs     rfx-tests: runs the C suites
 tests/*.c            the checks: DSP response measurements, shim behaviour, engine behaviour
 build.rs             compiles the C side; cargo does the rest
@@ -98,6 +102,35 @@ aligned writes. That is why the demo reports zero underruns at a 96-frame buffer
 
 The C shim exists so the Rust side never mirrors miniaudio's structs — only ~15 plain functions cross the
 boundary, which keeps the binding honest when miniaudio is updated.
+
+### How a track is analysed
+
+`rfx-analyze` (and, later, the library's import worker) decodes the file to mono at 22 050 Hz and makes three
+passes over it, each at the resolution its own job needs.
+
+**Tempo** comes from spectral flux — the rising part of the change between one 1024-point spectrum and the
+next — autocorrelated with a comb that also weighs the 2-, 3- and 4-beat lags, so a hi-hat pattern cannot win
+by being twice as dense as the kick. The winning lag is refined with a parabola through its neighbours and
+folded into 70–190 BPM.
+
+**The downbeat** is not taken from that envelope: at a 256-sample hop each frame is 11.6 ms wide and its energy
+sits half a window late, which is most of the budget gone before any beat is found. So the grid is locked on a
+plain block-RMS envelope at 64 samples — 2.9 ms — and tempo and phase are searched *together*, because an error
+of one BPM is already half a beat of drift across a three-minute track. Which of the four beats starts the bar
+is then decided by low-band energy, the way a DJ would: the kick marks bar one. Against fixtures built at a
+known tempo and offset this lands within 3 ms.
+
+**Key** needs frequency resolution the onset pass cannot give it — a 1024-point bin is 21.5 Hz, while a
+semitone at C3 is 7.8 Hz, so every low note would share a bin with its neighbours. A second 8192-point pass
+gives 2.7 Hz bins, and only spectral *peaks* are counted, each one's true frequency fitted through its
+neighbours, so the noise floor and the sheer number of high bins cannot outvote the notes. The resulting
+chroma is matched against the Krumhansl-Kessler profiles for all 24 keys and reported in Camelot notation,
+with both how well the winner fit and how far ahead of the runner-up it was — relative major and minor share
+every note, so a small margin is the honest way to say "this one is ambiguous".
+
+**The waveform** is the same 3-band split the decks already draw: 100 bins a second of low (<200 Hz),
+mid and high, one shared scale so the bands keep their balance, written alongside as `<name>.rfxwave` when
+`--wave <dir>` is given — three bytes per bin, nothing else.
 
 ## Next, once the numbers are in
 

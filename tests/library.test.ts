@@ -164,3 +164,102 @@ describe('deck defaults from preferences', () => {
     assert.equal(s.decks[1].tempoRange, s0.decks[1].tempoRange);
   });
 });
+
+describe('beat grid editing', () => {
+  const loaded = () => run(initialState(), { type: 'deck/load', deck: 0, trackId: 'demo-1' });
+  const trackOf = (s: EngineState) => s.library.tracks.find((t) => t.id === 'demo-1')!;
+
+  it('sets the downbeat at the playhead, inside one bar', () => {
+    let s = loaded();
+    const bar = (60 / trackOf(s).bpm) * 4;
+    s = run(s, { type: 'deck/seek', deck: 0, positionSec: 30.7 }, { type: 'grid/downbeatHere', deck: 0 });
+    const t = trackOf(s);
+    // 30.7 s is some whole number of bars plus an offset; the stored downbeat is that offset.
+    assert.ok(t.firstBeatSec >= 0 && t.firstBeatSec < bar);
+    const bars = (30.7 - t.firstBeatSec) / bar;
+    assert.ok(Math.abs(bars - Math.round(bars)) < 1e-6, `the playhead lands on a bar line (${bars} bars)`);
+  });
+
+  it('follows the track onto the deck and into the library', () => {
+    const s = run(loaded(), { type: 'deck/seek', deck: 0, positionSec: 10 }, { type: 'grid/downbeatHere', deck: 0 });
+    assert.equal(s.decks[0].track!.firstBeatSec, trackOf(s).firstBeatSec);
+  });
+
+  it('nudges by milliseconds and wraps inside the bar', () => {
+    let s = loaded();
+    const before = trackOf(s).firstBeatSec;
+    s = run(s, { type: 'grid/nudge', deck: 0, ms: 12 });
+    assert.ok(Math.abs(trackOf(s).firstBeatSec - (before + 0.012)) < 1e-9);
+    s = run(s, { type: 'grid/nudge', deck: 0, ms: -50 });
+    const bar = (60 / trackOf(s).bpm) * 4;
+    assert.ok(trackOf(s).firstBeatSec >= 0 && trackOf(s).firstBeatSec < bar, 'never goes negative');
+  });
+
+  it('halves and doubles the BPM, and refuses to leave the sane range', () => {
+    let s = loaded();
+    const bpm = trackOf(s).bpm;
+    s = run(s, { type: 'grid/scale', deck: 0, factor: 0.5 });
+    assert.equal(trackOf(s).bpm, bpm / 2);
+    s = run(s, { type: 'grid/scale', deck: 0, factor: 2 });
+    assert.equal(trackOf(s).bpm, bpm);
+    s = run(s, { type: 'grid/scale', deck: 0, factor: 2 });
+    assert.equal(trackOf(s).bpm, bpm, '248 BPM is past the sane range, so the doubling is refused');
+  });
+
+  it('taps a tempo out of four taps', () => {
+    let s = loaded();
+    // four taps half a second apart = 120 BPM
+    for (let i = 0; i < 4; i++) {
+      s = run(s, { type: 'grid/tap', deck: 0 });
+      s = run(s, { type: 'transport/tick', dt: 0.5 });
+    }
+    assert.ok(Math.abs(trackOf(s).bpm - 120) < 0.5, `tapped ${trackOf(s).bpm}`);
+  });
+
+  it('needs three taps before it commits', () => {
+    let s = loaded();
+    const bpm = trackOf(s).bpm;
+    s = run(s, { type: 'grid/tap', deck: 0 }, { type: 'transport/tick', dt: 0.5 }, { type: 'grid/tap', deck: 0 });
+    assert.equal(trackOf(s).bpm, bpm);
+    assert.equal(s.decks[0].gridTaps.length, 2);
+  });
+
+  it('resets to what analysis said', () => {
+    let s = run(loaded(), { type: 'deck/seek', deck: 0, positionSec: 4 }, { type: 'grid/downbeatHere', deck: 0 }, { type: 'grid/scale', deck: 0, factor: 0.5 });
+    const t = trackOf(s);
+    assert.equal(t.bpmOriginal, 124);
+    s = run(s, { type: 'grid/reset', deck: 0 });
+    const back = trackOf(s);
+    assert.equal(back.bpm, 124);
+    assert.equal(back.firstBeatSec, 0.08);
+    assert.equal(back.bpmOriginal, undefined);
+  });
+
+  it('does nothing without a track', () => {
+    const s = initialState();
+    assert.equal(run(s, { type: 'grid/downbeatHere', deck: 1 }), s);
+    assert.equal(run(s, { type: 'grid/tap', deck: 1 }), s);
+  });
+
+  it('saves a corrected grid and restores it with the original still available', () => {
+    const store = new MemStorage();
+    const edited = run(loaded(), { type: 'grid/scale', deck: 0, factor: 0.5 }, { type: 'grid/nudge', deck: 0, ms: 25 });
+    save(edited, store);
+    const saved = loadSaved(store);
+    assert.equal(saved.tracks!['demo-1'].bpm, 62);
+    assert.equal(saved.tracks!['demo-2'].bpm, undefined, 'an untouched grid is not saved');
+
+    const fresh = run(initialState(), { type: 'library/hydrate', edits: saved.tracks! });
+    const t = fresh.library.tracks.find((x) => x.id === 'demo-1')!;
+    assert.equal(t.bpm, 62);
+    assert.ok(Math.abs(t.firstBeatSec - 0.105) < 1e-9);
+    assert.equal(t.bpmOriginal, 124, 'reset still knows where it started');
+  });
+
+  it('ignores a junk grid in saved data', () => {
+    const fresh = run(initialState(), { type: 'library/hydrate', edits: { 'demo-1': { bpm: 9000, firstBeatSec: -3 } } });
+    const t = fresh.library.tracks.find((x) => x.id === 'demo-1')!;
+    assert.equal(t.bpm, 124);
+    assert.equal(t.firstBeatSec, 0.08);
+  });
+});

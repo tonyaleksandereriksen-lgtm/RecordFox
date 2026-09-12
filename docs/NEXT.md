@@ -77,16 +77,46 @@ explains that audio needs the desktop app.
 
 1. **Add a music folder** (Electron dialog, recursive scan, remember it). Probe each file through the
    native side: duration, sample rate, channels, and tags (the `lofty` crate reads id3/vorbis/flac).
-2. **Analysis on a worker thread** in Rust: 3-band waveform at the existing `WaveformData` shape
-   (100 bins/s), BPM, beatgrid (first beat + tempo), and Camelot key. Cache per file on disk; reuse it on
-   the next launch; show progress in the library.
-3. **Library storage.** Replace the localStorage snapshot with a real store (SQLite through the addon, or
+2. **Analysis — the measuring is done (2026-09-12), the wiring is not.**
+   `native/src/rfx_analyze.c` already produces everything the library needs from one call, and
+   `run-analyze.bat` / `cargo run --release --bin rfx-analyze -- <folder>` runs it on real files today:
+   BPM, first beat, key in Camelot, and the 3-band waveform at the `WaveformData` shape the decks already
+   draw (100 bins/s). Verified against fixtures of known tempo and offset — 124.01 BPM at 0.373 s against
+   a true 124 / 0.370, 92.50 at 1.236 against 92.5 / 1.234, and both key fixtures correct
+   (`native/tests/analyze_test.c`, run by `run-tests.bat`). What is left:
+   - Call it from the addon on a worker thread and report progress in the library. The C side is already
+     flat — `rfx_analysis_run()` then `rfx_analysis_double/int/text/wave()`, no structs cross the
+     boundary — so the addon binding is thin.
+   - Write the results into `Track.bpm` / `Track.firstBeatSec` / `Track.key` / the waveform cache, which
+     the whole app already reads (grid drawing, quantize, sync phase, bar counter): nothing downstream
+     has to change.
+   - Cache per file on disk (the analysis is ~0.1 s for 20 s of audio, so a 6-minute track is under a
+     second, but a 2000-track folder is not) and reuse it on the next launch.
+   - `keyMargin` is the honest ambiguity signal: relative major and minor share every note, so a small
+     margin means "show this key greyed or with a ?", not "wrong".
+   - The grid must travel with the track into the engine once the audio thread owns the clock (M1):
+     phase sync and quantize are computed from `firstBeatSec` + BPM, so the engine needs both to keep
+     two decks locked without the reducer guessing.
+3. ~~**Beat grid editing**~~ — **done 2026-09-12.** `grid/downbeatHere`, `grid/nudge`, `grid/scale`,
+   `grid/bpm`, `grid/tap` and `grid/reset` in the reducer; the GRID button on each waveform lane opens
+   `GridPanel` (downbeat here, ±1/±10 ms, ½, ×2, tap tempo, reset); bar lines turn red while editing, as
+   rekordbox does; `bpmOriginal` / `firstBeatSecOriginal` keep what analysis said so RESET works after a
+   restart, and the corrected grid is what persists. Still open: a metronome click to check the grid by
+   ear (needs the audio engine, so it belongs with M1), and "nudge only from here", which needs more than
+   one grid marker per track.
+4. **Library storage.** Replace the localStorage snapshot with a real store (SQLite through the addon, or
    a single JSON index if that is faster to get right) keeping ratings, comments, playlists, hot cues and
    analysis. Migrate what localStorage already holds.
 
-**Done when:** pointing at a folder fills the library with real durations, tags, waveforms, BPM and key;
-a second launch is instant from cache; the demo tracks still load; export copies the audio files next to
-the `.m3u8` and `.rekordfox.json` (that last bit finishes M5).
+Optional, once the above works: fill gaps in missing tags from an online source. AcoustID fingerprinting
+plus MusicBrainz is the open route (both have free APIs); it never overwrites what analysis measured, only
+empty title/artist/album/genre fields, and it must stay off by default since it sends fingerprints out.
+
+**Done when:** pointing at a folder fills the library with real durations, tags, waveforms, BPM and key
+*from inside the app* (the CLI already proves the numbers);
+the grid lines up with the kick on a track whose BPM drifts, and can be corrected by hand in a few
+seconds when it does not; a second launch is instant from cache; the demo tracks still load; export copies
+the audio files next to the `.m3u8` and `.rekordfox.json` (that last bit finishes M5).
 
 ## M3 — Hardware verification session (needs the unit)
 

@@ -55,10 +55,20 @@ pub mod sys {
         pub fn rfx_engine_frames_rendered() -> u64;
         pub fn rfx_engine_underruns() -> c_uint;
 
+        // --- offline analysis ---
+        pub fn rfx_analysis_run(path: *const c_char) -> c_int;
+        pub fn rfx_analysis_error() -> *const c_char;
+        pub fn rfx_analysis_double(key: c_int) -> c_double;
+        pub fn rfx_analysis_int(key: c_int) -> c_int;
+        pub fn rfx_analysis_text(key: c_int) -> *const c_char;
+        pub fn rfx_analysis_wave(dst: *mut u8, cap_bytes: c_int) -> c_int;
+        pub fn rfx_analysis_release();
+
         // --- C test suites ---
         pub fn rfx_dsp_test_main() -> c_int;
         pub fn rfx_engine_test_main(scratch_dir: *const c_char) -> c_int;
         pub fn rfx_shim_test_main() -> c_int;
+        pub fn rfx_analyze_test_main() -> c_int;
     }
 
     /// A C string from the shim as an owned Rust string ("" when null).

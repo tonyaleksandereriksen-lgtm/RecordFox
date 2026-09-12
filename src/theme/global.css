@@ -642,6 +642,72 @@ textarea {
   background: color-mix(in srgb, var(--color-bg-base) 70%, transparent);
   pointer-events: none;
 }
+.lane-grid-btn {
+  position: absolute;
+  left: 30px;
+  top: 5px;
+  height: 17px;
+  padding: 0 7px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--color-bg-base) 78%, transparent);
+  color: var(--color-text-muted);
+  font-size: 9px;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+.lane-grid-btn:hover {
+  color: var(--color-text-primary);
+}
+.lane-grid-btn.edited {
+  color: var(--color-state-warn);
+  border-color: color-mix(in srgb, var(--color-state-warn) 50%, transparent);
+}
+.lane-grid-btn.on {
+  color: var(--color-state-danger);
+  border-color: var(--color-state-danger);
+  background: color-mix(in srgb, var(--color-state-danger) 14%, var(--color-bg-base));
+}
+
+/* The beat-grid editor, floating over the lane it belongs to. */
+.grid-panel {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--color-state-danger) 45%, var(--color-line-strong));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-bg-raised) 94%, transparent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.grid-panel .mini {
+  height: 20px;
+}
+.grid-panel .mini.wide {
+  min-width: 58px;
+}
+.grid-nudge {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.grid-nudge .mini {
+  min-width: 28px;
+  font-family: var(--font-mono);
+}
+.grid-unit {
+  font-size: 9px;
+  color: var(--color-text-faint);
+}
+.grid-readout {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  padding: 0 2px;
+}
+
 .lane-bars {
   position: absolute;
   right: 10px;

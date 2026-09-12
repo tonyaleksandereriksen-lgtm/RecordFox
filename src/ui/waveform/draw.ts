@@ -118,6 +118,8 @@ export function drawScrolling(
   zoomSec: number,
   rate: number,
   deckColor: string,
+  /** While the grid editor is open, bar lines go red and beats brighten — the grid is the subject. */
+  gridEdit = false,
 ) {
   ctx.clearRect(0, 0, width, height);
   const track = d.track!;
@@ -147,8 +149,8 @@ export function drawScrolling(
     if (bt < 0 || bt > track.durationSec) continue;
     const x = width / 2 + (bt - pos) / tpp;
     const bar = ((k % 4) + 4) % 4 === 0;
-    ctx.fillStyle = bar ? W.gridBar : W.grid;
-    ctx.fillRect(Math.round(x), 0, bar ? 1.5 : 1, height);
+    ctx.fillStyle = gridEdit ? (bar ? tokens.color.state.danger : 'rgba(214, 236, 248, 0.24)') : bar ? W.gridBar : W.grid;
+    ctx.fillRect(Math.round(x), 0, bar ? (gridEdit ? 2 : 1.5) : 1, height);
   }
 
   // waveform

@@ -54,8 +54,14 @@ the clock in the audio slice.
 - Long lists (MIDI monitor) are throttled (~10 fps) and virtualised — never render 600 rows.
 
 ## Commands
-`npm test` (94 tests) · `npm run typecheck` · `npm run dev` · `npm run build` · `npm run app` · `npm run app:dev` · `npm run docs:midi`
+`npm test` (104 tests) · `npm run typecheck` · `npm run dev` · `npm run build` · `npm run app` · `npm run app:dev` · `npm run docs:midi`
 Windows: `start.bat` (browser, builds first), `start-desktop.bat` (Electron), `dev.bat` (Vite dev).
+
+## Beat grid (from 0.2.2)
+`Track.bpm` + `Track.firstBeatSec` is the whole grid. `bpmOriginal` / `firstBeatSecOriginal` hold what analysis
+said, are set on the first hand edit and are what `grid/reset` restores (they persist, so RESET survives a
+restart). `firstBeatSec` is always folded into the first bar. GRID on a waveform lane opens `GridPanel`; bar
+lines draw in `state.danger` while `ui.gridDeck` is that deck.
 
 ## Native audio (from 0.2.1)
 `native/` holds the audio engine's foundation: miniaudio vendored in `native/vendor/`, a flat C shim
@@ -63,13 +69,17 @@ Windows: `start.bat` (browser, builds first), `start-desktop.bat` (Electron), `d
 WASAPI exclusive mode and reports the real buffer size. Build with `cargo run --release` (needs rustup + the MSVC
 "Desktop development with C++" workload). `native/tests/shim_test.c` checks the shim without a sound card; miniaudio's
 null backend can be forced anywhere with `RFX_BACKEND=null`.
+Offline analysis lives beside it (`rfx_analyze.c` + `rfx_fft.c`): one call gives BPM, downbeat, Camelot key and
+the 3-band waveform, read back through flat getters (`rfx_analysis_run` then `rfx_analysis_double/int/text/wave`)
+so no struct crosses the FFI. `run-analyze.bat` / `cargo run --release --bin rfx-analyze -- <folder>` runs it on
+real files; `run-tests.bat` covers it against fixtures of known tempo, offset and key.
 Why: the browser stack measured ~52 ms on the hardware (`docs/audio-check-2026-09-12.json`) — fine for mixing,
 useless for scratching, and Chromium cannot reach WASAPI exclusive from any process it owns.
 
 ## Open issues
 `docs/NEXT.md` is the working backlog (milestones with acceptance criteria, written for a Claude Code session
 running in this folder). `docs/AUDIT.md` — see the "Status — 0.2.0" section at the end for what's fixed and what's left.
-Next: the native audio engine (probe result first), then local files and analysis, then Audius.
+Next: the Node addon + engine wiring (M1), then the library reading the analyser that already works (M2), then Audius.
 
 ## Open items to verify on hardware
 SYNC long-press vs SHIFT+SYNC (`2A`/`5C`), SHIFT + CH CUE (`08`), ch-7 notes `96 00/01/09` (Smart CFX / Smart Fader),

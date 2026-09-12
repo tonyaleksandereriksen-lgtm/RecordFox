@@ -28,6 +28,7 @@ import type { DeckIndex, DeckState, EngineState, MixerState, Track } from './typ
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const clamp01 = (v: number) => clamp(v, 0, 1);
+const deckName = (d: DeckIndex) => (d === 0 ? 'A' : 'B');
 
 let toastSeq = 0;
 
@@ -53,6 +54,23 @@ function updateTrack(s: EngineState, id: string, patch: Partial<Track>): EngineS
   const tracks = s.library.tracks.map((t) => (t.id === id ? { ...t, ...patch } : t));
   const decks = s.decks.map((d) => (d.track && d.track.id === id ? { ...d, track: { ...d.track, ...patch } } : d)) as [DeckState, DeckState];
   return { ...s, decks, library: { ...s.library, tracks } };
+}
+
+/**
+ * The beat grid is `bpm` + `firstBeatSec` on the track, so a correction belongs to the track and
+ * follows it onto both decks and into the library. The first edit stores what analysis produced so
+ * RESET can go back to it. `firstBeatSec` is kept inside one bar, which keeps the downbeats where
+ * the DJ put them.
+ */
+function editGrid(s: EngineState, deck: DeckIndex, patch: { bpm?: number; firstBeatSec?: number }): EngineState {
+  const t = s.decks[deck].track;
+  if (!t) return s;
+  const bpm = clamp(patch.bpm ?? t.bpm, 40, 220);
+  const bar = (60 / bpm) * 4;
+  const raw = patch.firstBeatSec ?? t.firstBeatSec;
+  const firstBeatSec = ((raw % bar) + bar) % bar;
+  const keep = t.bpmOriginal === undefined ? { bpmOriginal: t.bpm, firstBeatSecOriginal: t.firstBeatSec } : {};
+  return updateTrack(s, t.id, { bpm, firstBeatSec, ...keep });
 }
 
 /** Hot cues belong to the track: mirror the deck's cues into the library so they persist. */
@@ -603,6 +621,67 @@ function reduceAction(s: EngineState, a: EngineAction): EngineState {
       return { ...s, sampler: { ...s.sampler, playing, startedAt } };
     }
 
+    case 'grid/downbeatHere': {
+      const d = s.decks[a.deck];
+      if (!d.track) return s;
+      return toast(editGrid(s, a.deck, { firstBeatSec: d.positionSec }), `Deck ${deckName(a.deck)} · downbeat set here`, 'ok');
+    }
+
+    case 'grid/nudge': {
+      const d = s.decks[a.deck];
+      if (!d.track) return s;
+      const next = editGrid(s, a.deck, { firstBeatSec: d.track.firstBeatSec + a.ms / 1000 });
+      return toast(next, `Deck ${deckName(a.deck)} · grid ${a.ms > 0 ? '+' : '−'}${Math.abs(a.ms)} ms`);
+    }
+
+    case 'grid/scale': {
+      const d = s.decks[a.deck];
+      if (!d.track) return s;
+      const bpm = d.track.bpm * a.factor;
+      if (bpm < 40 || bpm > 220) return toast(s, `Deck ${deckName(a.deck)} · ${bpm.toFixed(0)} BPM is out of range`, 'warn');
+      return toast(editGrid(s, a.deck, { bpm }), `Deck ${deckName(a.deck)} · ${bpm.toFixed(2)} BPM`, 'ok');
+    }
+
+    case 'grid/bpm': {
+      if (!s.decks[a.deck].track || !Number.isFinite(a.bpm)) return s;
+      return toast(editGrid(s, a.deck, { bpm: a.bpm }), `Deck ${deckName(a.deck)} · ${clamp(a.bpm, 40, 220).toFixed(2)} BPM`, 'ok');
+    }
+
+    /**
+     * Tap tempo. The clock ticks once per frame in this slice, so four taps land within about half a
+     * BPM; the audio engine's clock makes it exact later.
+     */
+    case 'grid/tap': {
+      const d = s.decks[a.deck];
+      if (!d.track) return s;
+      const taps = [...d.gridTaps.filter((t) => s.clock - t < 3), s.clock];
+      const withTaps = setDeck(s, a.deck, { gridTaps: taps });
+      if (taps.length < 3) return toast(withTaps, `Deck ${deckName(a.deck)} · keep tapping (${taps.length})`);
+      const spans = taps.slice(1).map((t, i) => t - taps[i]);
+      const mean = spans.reduce((x, y) => x + y, 0) / spans.length;
+      if (mean < 0.15) return withTaps;
+      let bpm = 60 / mean;
+      while (bpm < 70) bpm *= 2;
+      while (bpm > 190) bpm /= 2;
+      bpm = Math.round(bpm * 100) / 100;
+      return toast(editGrid(withTaps, a.deck, { bpm }), `Deck ${deckName(a.deck)} · tapped ${bpm.toFixed(2)} BPM`, 'ok');
+    }
+
+    case 'grid/reset': {
+      const t = s.decks[a.deck].track;
+      if (!t || t.bpmOriginal === undefined) return s;
+      const next = updateTrack(s, t.id, {
+        bpm: t.bpmOriginal,
+        firstBeatSec: t.firstBeatSecOriginal ?? t.firstBeatSec,
+        bpmOriginal: undefined,
+        firstBeatSecOriginal: undefined,
+      });
+      return toast(setDeck(next, a.deck, { gridTaps: [] }), `Deck ${deckName(a.deck)} · grid back to ${t.bpmOriginal.toFixed(2)} BPM`);
+    }
+
+    case 'ui/gridDeck':
+      return s.ui.gridDeck === a.deck ? s : { ...s, ui: { ...s.ui, gridDeck: a.deck } };
+
     case 'library/select':
       return { ...s, library: { ...s.library, selectedId: a.trackId } };
 
@@ -641,6 +720,20 @@ function reduceAction(s: EngineState, a: EngineAction): EngineState {
         if (typeof e.comment === 'string') patch.comment = e.comment;
         if (Array.isArray(e.playlists)) patch.playlists = e.playlists.filter((p) => s.library.playlists.some((x) => x.id === p && !x.smart));
         if (Array.isArray(e.cues)) patch.cues = e.cues.slice(0, 8).map((c) => (typeof c === 'number' && Number.isFinite(c) ? c : null));
+        // A corrected beat grid: keep what analysis said so RESET still works after a restart.
+        const current = s.library.tracks.find((t) => t.id === id)!;
+        if (typeof e.bpm === 'number' && Number.isFinite(e.bpm) && e.bpm >= 40 && e.bpm <= 220 && e.bpm !== current.bpm) {
+          patch.bpm = e.bpm;
+          patch.bpmOriginal = current.bpm;
+          patch.firstBeatSecOriginal = current.firstBeatSec;
+        }
+        if (typeof e.firstBeatSec === 'number' && Number.isFinite(e.firstBeatSec) && e.firstBeatSec >= 0 && e.firstBeatSec < 10) {
+          if (patch.bpmOriginal === undefined && e.firstBeatSec !== current.firstBeatSec) {
+            patch.bpmOriginal = current.bpm;
+            patch.firstBeatSecOriginal = current.firstBeatSec;
+          }
+          patch.firstBeatSec = e.firstBeatSec;
+        }
         next = updateTrack(next, id, patch);
       }
       return next;

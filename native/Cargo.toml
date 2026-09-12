@@ -26,6 +26,10 @@ path = "src/bin/demo.rs"
 name = "rfx-tests"
 path = "src/bin/tests.rs"
 
+[[bin]]
+name = "rfx-analyze"
+path = "src/bin/analyze.rs"
+
 [build-dependencies]
 cc = "1"
 

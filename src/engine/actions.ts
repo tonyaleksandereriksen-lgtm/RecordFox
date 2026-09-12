@@ -32,6 +32,12 @@ export type EngineAction =
   | { type: 'deck/quantize'; deck: DeckIndex }
   | { type: 'deck/keyLock'; deck: DeckIndex }
   | { type: 'deck/slip'; deck: DeckIndex }
+  | { type: 'grid/downbeatHere'; deck: DeckIndex }
+  | { type: 'grid/nudge'; deck: DeckIndex; ms: number }
+  | { type: 'grid/scale'; deck: DeckIndex; factor: 0.5 | 2 }
+  | { type: 'grid/bpm'; deck: DeckIndex; bpm: number }
+  | { type: 'grid/tap'; deck: DeckIndex }
+  | { type: 'grid/reset'; deck: DeckIndex }
   | { type: 'deck/padMode'; deck: DeckIndex; mode: PadMode; fromHardware: boolean }
   | { type: 'deck/padModeSelect'; deck: DeckIndex }
   | { type: 'deck/padFx'; deck: DeckIndex; index: number; pressed: boolean }
@@ -68,5 +74,6 @@ export type EngineAction =
   | { type: 'ui/view'; view: View }
   | { type: 'ui/bottomTab'; tab: BottomTab }
   | { type: 'ui/settingsSection'; section: SettingsSection }
+  | { type: 'ui/gridDeck'; deck: DeckIndex | null }
   | { type: 'ui/zoom'; dir: -1 | 1 }
   | { type: 'ui/toast'; text: string; tone?: 'info' | 'warn' | 'ok' };

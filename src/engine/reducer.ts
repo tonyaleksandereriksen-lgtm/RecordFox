@@ -1,7 +1,9 @@
 /**
  * Engine reducer: (state, action) -> state. Pure and synchronous so every hardware gesture is
- * testable without Web MIDI or audio. In slice 1 the transport clock is simulated by
- * 'transport/tick'; the audio engine takes over the clock in slice 2 with the same state shape.
+ * testable without Web MIDI or audio. Two clocks feed it: 'transport/tick' (the animation frame)
+ * advances decks the native engine is not driving, and 'transport/sync' carries the engine's own
+ * playheads for the decks it holds (`DeckState.engine`). The audio bridge mirrors the rest of the
+ * state into the engine by diffing it, so every gesture stays a plain state change here.
  */
 import type { EngineAction } from './actions.ts';
 import {
@@ -117,6 +119,7 @@ function loadTrack(d: DeckState, track: Track): DeckState {
     padFxHeld: null,
     jogTouched: false,
     loadSeq: d.loadSeq + 1,
+    engine: false,
   };
 }
 
@@ -147,7 +150,8 @@ function tickDeck(s: EngineState, i: DeckIndex, dt: number): DeckState {
   // The shadow playhead keeps moving at the deck's normal rate, even while scratching.
   let slipPos = d.slipPos;
   if (slipPos !== null) slipPos = Math.min(d.track.durationSec, slipPos + dt * baseRate(s, i));
-  if (d.jogTouched && d.vinyl) {
+  // Under the hand the position comes from jog ticks; on an engine deck it comes from the engine.
+  if ((d.jogTouched && d.vinyl) || d.engine) {
     return bend === d.bend && slipPos === d.slipPos ? d : { ...d, bend, slipPos };
   }
   let pos = wrapLoop(d, d.positionSec + dt * rate);
@@ -167,7 +171,26 @@ function loopStart(d: DeckState, t: number, beats: number): number {
   return Math.max(0, d.track.firstBeatSec + k * grid);
 }
 
+/** True while the platter is held in vinyl mode: the hand, not the clock, moves the playhead. */
+function underHand(d: DeckState): boolean {
+  return d.jogTouched && d.vinyl;
+}
+
 export function reduce(s: EngineState, a: EngineAction): EngineState {
+  const next = reduceAction(s, a);
+  if (next === s || a.type === 'transport/tick' || a.type === 'transport/sync') return next;
+  // Any other change of position is a jump: count it so the audio bridge seeks the engine once.
+  let decks = next.decks;
+  for (const i of [0, 1] as DeckIndex[]) {
+    if (next.decks[i].positionSec === s.decks[i].positionSec) continue;
+    if (a.type === 'deck/jog' && a.mode === 'scratch' && a.deck === i) continue; // the hand dragging the playhead
+    if (decks === next.decks) decks = decks.slice() as [DeckState, DeckState];
+    decks[i] = { ...decks[i], seekSeq: decks[i].seekSeq + 1 };
+  }
+  return decks === next.decks ? next : { ...next, decks };
+}
+
+function reduceAction(s: EngineState, a: EngineAction): EngineState {
   switch (a.type) {
     case 'transport/tick': {
       const dt = clamp(a.dt, 0, 0.25);
@@ -200,7 +223,33 @@ export function reduce(s: EngineState, a: EngineAction): EngineState {
     case 'deck/eject': {
       const d = s.decks[a.deck];
       if (!d.track || d.playing) return s;
-      return fixMaster(setDeck(s, a.deck, { track: null, positionSec: 0, cueSec: 0, hotCues: Array(8).fill(null), master: false, sync: false, slipPos: null }));
+      return fixMaster(setDeck(s, a.deck, { track: null, positionSec: 0, cueSec: 0, hotCues: Array(8).fill(null), master: false, sync: false, slipPos: null, engine: false }));
+    }
+
+    case 'deck/engine': {
+      const d = s.decks[a.deck];
+      if (d.engine === a.ready || (a.ready && !d.track)) return s;
+      return setDeck(s, a.deck, { engine: a.ready });
+    }
+
+    case 'transport/sync': {
+      let decks = s.decks;
+      let stopped = false;
+      for (const i of [0, 1] as DeckIndex[]) {
+        const d = s.decks[i];
+        const pos = a.positions[i];
+        if (!d.engine || !d.track || pos === null) continue;
+        // Under the hand the reducer's position is the target the engine follows, so keep it.
+        const positionSec = underHand(d) ? d.positionSec : clampPos(d, pos);
+        const playing = d.playing && !a.playing[i] ? false : d.playing;
+        if (positionSec === d.positionSec && playing === d.playing) continue;
+        if (decks === s.decks) decks = decks.slice() as [DeckState, DeckState];
+        decks[i] = { ...d, positionSec, playing };
+        if (playing !== d.playing) stopped = true;
+      }
+      if (decks === s.decks) return s;
+      const out = { ...s, decks };
+      return stopped ? fixMaster(out) : out;
     }
 
     case 'deck/playPause': {
@@ -575,6 +624,12 @@ export function reduce(s: EngineState, a: EngineAction): EngineState {
       if (!t || !pl || pl.smart) return s;
       const playlists = t.playlists.includes(a.playlistId) ? t.playlists.filter((p) => p !== a.playlistId) : [...t.playlists, a.playlistId];
       return updateTrack(s, a.trackId, { playlists });
+    }
+
+    case 'library/add': {
+      const fresh = a.tracks.filter((t, i) => !s.library.tracks.some((x) => x.id === t.id) && a.tracks.findIndex((x) => x.id === t.id) === i);
+      if (fresh.length === 0) return s;
+      return { ...s, library: { ...s.library, tracks: [...s.library.tracks, ...fresh], selectedId: fresh[0].id } };
     }
 
     case 'library/hydrate': {

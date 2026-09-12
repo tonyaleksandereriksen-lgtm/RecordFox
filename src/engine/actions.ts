@@ -1,5 +1,5 @@
 import type { PadMode } from '../midi/types.ts';
-import type { BottomTab, DeckIndex, Prefs, SettingsSection, TrackEdits, View } from './types.ts';
+import type { BottomTab, DeckIndex, Prefs, SettingsSection, Track, TrackEdits, View } from './types.ts';
 
 export type ChannelParam = 'trim' | 'eqHi' | 'eqMid' | 'eqLow' | 'cfx' | 'fader';
 export type MasterParam = 'masterLevel' | 'phonesLevel' | 'phonesMix';
@@ -38,6 +38,8 @@ export type EngineAction =
   | { type: 'deck/faderStart'; deck: DeckIndex; action: 'play' | 'sync' | 'cue' }
   | { type: 'deck/shift'; deck: DeckIndex; down: boolean }
   | { type: 'deck/seek'; deck: DeckIndex; positionSec: number }
+  /** The audio bridge reports whether the native engine now holds the deck's track. */
+  | { type: 'deck/engine'; deck: DeckIndex; ready: boolean }
   | { type: 'mixer/set'; ch: DeckIndex; param: ChannelParam; value: number }
   | { type: 'mixer/pfl'; ch: DeckIndex }
   | { type: 'mixer/crossfader'; value: number }
@@ -47,6 +49,12 @@ export type EngineAction =
   | { type: 'mixer/smartCfx' }
   | { type: 'sampler/pad'; slot: number; pressed: boolean; shift: boolean }
   | { type: 'transport/tick'; dt: number }
+  /**
+   * The engine's playheads, once per frame. `positions[i]` is null for a deck the engine is not
+   * driving this frame; `playing[i]` false means the engine stopped a deck we told to play
+   * (end of track).
+   */
+  | { type: 'transport/sync'; positions: [number | null, number | null]; playing: [boolean, boolean] }
   | { type: 'library/select'; trackId: string | null }
   | { type: 'library/query'; query: string }
   | { type: 'library/view'; view: string }
@@ -54,6 +62,8 @@ export type EngineAction =
   | { type: 'library/comment'; trackId: string; comment: string }
   | { type: 'library/togglePlaylist'; trackId: string; playlistId: string }
   | { type: 'library/hydrate'; edits: Record<string, TrackEdits> }
+  /** Adds tracks (local files) that are not in the library yet. */
+  | { type: 'library/add'; tracks: Track[] }
   | { type: 'prefs/set'; patch: Partial<Prefs> }
   | { type: 'ui/view'; view: View }
   | { type: 'ui/bottomTab'; tab: BottomTab }

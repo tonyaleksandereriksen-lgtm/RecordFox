@@ -15,8 +15,9 @@ export interface Track {
   title: string;
   artist: string;
   genre: string;
+  /** 0 until analysed (local files before M2); grid features then assume 120. */
   bpm: number;
-  /** Camelot notation, e.g. "8A". */
+  /** Camelot notation, e.g. "8A"; "" until analysed. */
   key: string;
   durationSec: number;
   firstBeatSec: number;
@@ -25,6 +26,8 @@ export interface Track {
   /** Seed for generated artwork and the demo waveform. Real analysis replaces the waveform in slice 2. */
   seed: number;
   source: 'demo' | 'local' | 'stream';
+  /** Absolute path on disk for local files — what the native engine decodes. */
+  path?: string;
   /** Hot cues A–H in seconds; saved with the library. */
   cues?: (number | null)[];
   rating: number; // 0..5
@@ -85,6 +88,18 @@ export interface DeckState {
   shift: boolean;
   /** Increments on every load; the LED writer turns it into the load illumination message. */
   loadSeq: number;
+  /**
+   * Increments whenever the playhead jumps (cue, hot cue, beat jump, needle search, loop wrap…)
+   * as opposed to moving with time or under the hand. The audio bridge turns each increment into
+   * one engine seek — the same idea as the engine's own seek sequence number.
+   */
+  seekSeq: number;
+  /**
+   * The native engine holds this deck's track and its playhead is the clock: 'transport/tick'
+   * no longer advances the position, 'transport/sync' sets it. False for demo tracks, in the
+   * browser build, and while a file is still decoding.
+   */
+  engine: boolean;
 }
 
 export interface ChannelState {

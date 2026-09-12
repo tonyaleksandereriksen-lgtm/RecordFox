@@ -40,6 +40,8 @@ export function initialDeck(prefs: Prefs = DEFAULT_PREFS): DeckState {
     jogTouched: false,
     shift: false,
     loadSeq: 0,
+    seekSeq: 0,
+    engine: false,
   };
 }
 

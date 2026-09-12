@@ -4,5 +4,5 @@
  */
 export const APP_NAME = 'RekordFox';
 export const APP_TAGLINE = 'Dig. Cue. Mix.';
-export const APP_VERSION = '0.2.0';
+export const APP_VERSION = '0.3.0';
 export const CONTROLLER_NAME = 'DDJ-FLX2';

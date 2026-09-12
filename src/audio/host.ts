@@ -65,8 +65,8 @@ export interface AudioHost {
   start(opts: { device: string | null }): Promise<AudioRunning>;
   stop(): Promise<void>;
   devices(): Promise<AudioDevice[]>;
-  /** Applies a batch of commands, then returns the engine's snapshot: one round trip per frame. */
-  frame(cmds: EngineCommand[]): Promise<EngineSnapshot>;
+  /** Applies a batch of commands, then returns the engine's snapshot: one round trip per frame. Null once the engine has stopped. */
+  frame(cmds: EngineCommand[]): Promise<EngineSnapshot | null>;
   /** Fire-and-forget batch for commands that must not wait for the next frame. */
   send(cmds: EngineCommand[]): void;
   /** Decodes a file into a deck; resolves with its length in seconds. */

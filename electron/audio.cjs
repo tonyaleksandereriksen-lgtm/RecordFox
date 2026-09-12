@@ -153,7 +153,8 @@ function registerAudio(getWindow) {
   ipcMain.handle('rfx:stop', () => stopAudio());
   ipcMain.handle('rfx:devices', () => listDevices());
   ipcMain.handle('rfx:frame', (_e, cmds) => {
-    if (!rfx || status.state !== 'running') throw new Error('the audio engine is not running');
+    // null = not running (stopping at quit, or between reopens): the bridge goes quiet, no error.
+    if (!rfx || status.state !== 'running') return null;
     apply(cmds);
     return rfx.snapshot();
   });

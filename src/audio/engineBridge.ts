@@ -45,6 +45,10 @@ export class EngineBridge {
   private inFlight = false;
   private underruns = 0;
   private lastStatus: AudioStatus = { state: 'idle' };
+  /** Frame counter from the last snapshot and how many snapshots it has stood still. */
+  private lastFrames = -1;
+  private stalled = 0;
+  private reopened = false;
 
   constructor(store: Engine, host: AudioHost, onStatus: (status: AudioStatus) => void) {
     this.store = store;
@@ -65,6 +69,8 @@ export class EngineBridge {
     try {
       const status = await this.host.start({ device });
       this.underruns = 0;
+      this.lastFrames = -1;
+      this.stalled = 0;
       this.setStatus(status);
     } catch (e) {
       this.setStatus({ state: 'error', message: hostErrorMessage(e) });
@@ -164,7 +170,15 @@ export class EngineBridge {
     this.host.frame(this.take()).then(
       (snap) => {
         this.inFlight = false;
-        if (this.running) this.onSnapshot(snap, sent);
+        if (!this.running) return;
+        if (snap === null) {
+          // The main process stopped the engine (quitting, or a reopen in progress): go quiet.
+          this.running = false;
+          meters.live = false;
+          if (this.lastStatus.state === 'running') this.setStatus({ state: 'idle' });
+          return;
+        }
+        this.onSnapshot(snap, sent);
       },
       (e) => {
         this.inFlight = false;
@@ -176,6 +190,9 @@ export class EngineBridge {
     );
   }
 
+  /** The device callback runs whether or not anything plays, so a frozen frame counter means the output died. */
+  private static readonly STALL_FRAMES = 90;
+
   private onSnapshot(snap: EngineSnapshot, sent: Sent): void {
     meters.deck[0] = snap.peak[0] ?? 0;
     meters.deck[1] = snap.peak[1] ?? 0;
@@ -183,6 +200,17 @@ export class EngineBridge {
     if (snap.underruns !== this.underruns && this.lastStatus.state === 'running') {
       this.underruns = snap.underruns;
       this.setStatus({ ...this.lastStatus, underruns: snap.underruns });
+    }
+    if (snap.frames === this.lastFrames) {
+      this.stalled += 1;
+      if (this.stalled === EngineBridge.STALL_FRAMES) {
+        this.onStall();
+        return;
+      }
+    } else {
+      this.lastFrames = snap.frames;
+      this.stalled = 0;
+      this.reopened = false;
     }
     const s = this.store.getState();
     const positions: [number | null, number | null] = [null, null];
@@ -195,6 +223,19 @@ export class EngineBridge {
       playing[deck] = (snap.playing[deck] ?? true) || !sent.playing[deck];
     }
     if (positions[0] !== null || positions[1] !== null) this.store.dispatch({ type: 'transport/sync', positions, playing });
+  }
+
+  /** The output stopped (unplugged, or taken by another program): reopen once on whatever is there. */
+  private onStall(): void {
+    this.running = false;
+    meters.live = false;
+    if (this.reopened) {
+      this.setStatus({ state: 'error', message: 'The audio output stopped and could not be reopened — check the device and press Start in Settings › Audio.' });
+      return;
+    }
+    this.reopened = true;
+    this.store.dispatch({ type: 'ui/toast', text: 'The audio output stopped (unplugged, or taken by another program) — reopening', tone: 'warn' });
+    void this.start(this.store.getState().prefs.audioDevice);
   }
 
   private async load(deck: DeckIndex, track: Track, gen: number): Promise<void> {

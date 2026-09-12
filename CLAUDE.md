@@ -1,7 +1,7 @@
 # CLAUDE.md — RekordFox
 
 Two-deck rekordbox-style Performance app for the AlphaTheta DDJ-FLX2. Owner: Tony. Windows is the primary dev machine
-(`F:\RekordFox`). Version 0.2.0. Tagline: *Dig. Cue. Mix.*
+(`F:\RekordFox`). Version 0.3.0. Tagline: *Dig. Cue. Mix.* Repo: github.com/tonyaleksandereriksen-lgtm/RecordFox (`main`).
 
 ## Hard rules (from the project brief)
 - Control path is **MIDI only** (USB class-compliant). Never WebHID, never CDJ HID / libpcon / Pro DJ Link, never Serato HID/OSC.
@@ -36,9 +36,14 @@ Two-deck rekordbox-style Performance app for the AlphaTheta DDJ-FLX2. Owner: Ton
 
 ## Architecture
 hardware bytes → `Flx2Decoder` → `Flx2Event` → `Bindings` (+ `SoftTakeover`) → `EngineAction` → `reduce()` → `EngineState`
-→ UI (React, `useEngine` selectors; canvases read `store.getState()` in rAF) and → `computeLeds()` → diff → `Flx2Midi.send()`.
-`runtime.ts` owns the singletons and the debounced save. The clock is `transport/tick` from rAF; the audio engine becomes
-the clock in the audio slice.
+→ UI (React, `useEngine` selectors; canvases read `store.getState()` in rAF) and → `computeLeds()` → diff → `Flx2Midi.send()`
+and → `EngineBridge` (`src/audio/`) → IPC → `electron/audio.cjs` → the native engine (`native/node/rfx.node`).
+`runtime.ts` owns the singletons and the debounced save. Two clocks: the native engine's playheads arrive once per frame as
+`transport/sync` for the decks it holds (`DeckState.engine`); `transport/tick` from rAF drives demo tracks and the browser
+build. The bridge diffs state into engine commands (`mirror.ts`, pure and tested): transport commands leave at once,
+knob values coalesce per frame, `DeckState.seekSeq` turns every playhead jump into exactly one engine seek, and under
+the hand the reducer's position is the target the engine's scratch-follow mode tracks. The addon lives in the main
+process only; the renderer never loads native code.
 
 ## Conventions
 - TypeScript, strict. Imports use explicit `.ts`/`.tsx` extensions; erasable syntax only (no enums/namespaces/param props) —
@@ -54,8 +59,13 @@ the clock in the audio slice.
 - Long lists (MIDI monitor) are throttled (~10 fps) and virtualised — never render 600 rows.
 
 ## Commands
-`npm test` (104 tests) · `npm run typecheck` · `npm run dev` · `npm run build` · `npm run app` · `npm run app:dev` · `npm run docs:midi`
-Windows: `start.bat` (browser, builds first), `start-desktop.bat` (Electron), `dev.bat` (Vite dev).
+`npm run check` (typecheck + 124 node tests + 126 native checks) · `npm test` · `npm run typecheck` · `npm run dev` ·
+`npm run build` · `npm run native` (builds the addon → `native/node/rfx.node`) · `npm run native:smoke` (loads it in
+Electron, opens the output for 0.5 s) · `node scripts/m1-check.mjs [--seconds N]` (drives the built desktop app on the
+FLX2 and measures drift, transport following, meters, underruns → `docs/m1-check-<date>.json`) · `npm run app` ·
+`npm run app:dev` · `npm run docs:midi`.
+Windows: `start.bat` (browser, builds first), `start-desktop.bat` (Electron; builds the addon once), `dev.bat` (Vite dev).
+Native builds need `cargo`; in a shell opened before Rust was installed, prefix `export PATH="$HOME/.cargo/bin:$PATH"`.
 
 ## Beat grid (from 0.2.2)
 `Track.bpm` + `Track.firstBeatSec` is the whole grid. `bpmOriginal` / `firstBeatSecOriginal` hold what analysis
@@ -63,12 +73,17 @@ said, are set on the first hand edit and are what `grid/reset` restores (they pe
 restart). `firstBeatSec` is always folded into the first bar. GRID on a waveform lane opens `GridPanel`; bar
 lines draw in `state.danger` while `ui.gridDeck` is that deck.
 
-## Native audio (from 0.2.1)
-`native/` holds the audio engine's foundation: miniaudio vendored in `native/vendor/`, a flat C shim
-(`native/src/rfx_audio.c` — plain functions only, no structs across FFI) and a Rust probe that opens the FLX2 in
-WASAPI exclusive mode and reports the real buffer size. Build with `cargo run --release` (needs rustup + the MSVC
-"Desktop development with C++" workload). `native/tests/shim_test.c` checks the shim without a sound card; miniaudio's
-null backend can be forced anywhere with `RFX_BACKEND=null`.
+## Native audio (from 0.2.1; wired into the app in 0.3.0)
+`native/` holds the audio engine: miniaudio vendored in `native/vendor/`, a flat C shim
+(`native/src/rfx_audio.c` — plain functions only, no structs across FFI), the DSP and the engine (`rfx_engine.c`), and a
+Rust probe that opens the FLX2 in WASAPI exclusive mode and reports the real buffer size. Build with `cargo run --release`
+(needs rustup + the MSVC "Desktop development with C++" workload). `native/tests/shim_test.c` checks the shim without a
+sound card; miniaudio's null backend can be forced anywhere with `RFX_BACKEND=null`.
+`native/node/` is the Node-API addon (napi-rs, a workspace member): a safe wrapper over `rfx::sys` with `deckLoad` and
+`probeFile` on the thread pool and a single `snapshot()` per frame. It loads in Electron 37's main process with no
+electron-rebuild. Engine rules the bridge relies on: `rfx_deck_scratch_to()` (follow-the-hand scratch, one target per
+UI frame, speed estimated on the audio clock), seeks re-anchor the follower, `rfx_engine_frames_rendered()` freezing
+means the device callback died (the bridge reopens once).
 Offline analysis lives beside it (`rfx_analyze.c` + `rfx_fft.c`): one call gives BPM, downbeat, Camelot key and
 the 3-band waveform, read back through flat getters (`rfx_analysis_run` then `rfx_analysis_double/int/text/wave`)
 so no struct crosses the FFI. `run-analyze.bat` / `cargo run --release --bin rfx-analyze -- <folder>` runs it on
@@ -79,7 +94,8 @@ useless for scratching, and Chromium cannot reach WASAPI exclusive from any proc
 ## Open issues
 `docs/NEXT.md` is the working backlog (milestones with acceptance criteria, written for a Claude Code session
 running in this folder). `docs/AUDIT.md` — see the "Status — 0.2.0" section at the end for what's fixed and what's left.
-Next: the Node addon + engine wiring (M1), then the library reading the analyser that already works (M2), then Audius.
+Done: M1 (the app plays audio through the FLX2 — `docs/m1-check-2026-09-12.json`). Next: M2 — folders, tags and the
+analyser that already works, called from the addon; then M3 on the hardware; then Audius.
 
 ## Open items to verify on hardware
 SYNC long-press vs SHIFT+SYNC (`2A`/`5C`), SHIFT + CH CUE (`08`), ch-7 notes `96 00/01/09` (Smart CFX / Smart Fader),

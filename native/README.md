@@ -132,9 +132,20 @@ every note, so a small margin is the honest way to say "this one is ambiguous".
 mid and high, one shared scale so the bands keep their balance, written alongside as `<name>.rfxwave` when
 `--wave <dir>` is given — three bytes per bin, nothing else.
 
-## Next, once the numbers are in
+## In the app: the Node-API addon (`node/`)
 
-The same shim gains a real data callback: two decks (decode → resample/time-stretch → gain/EQ/filter),
-the mixer, crossfader and cue bus, master on channels 1/2 and headphones on 3/4 — with the engine's clock
-coming from the audio thread instead of the browser's animation frames. The React UI, the FLX2 MIDI map,
-soft takeover and the LED writer stay exactly as they are; only what makes sound changes.
+`node/` is a second crate in this workspace that builds the engine as a Node-API addon (napi-rs) —
+`npm run native` from the project root puts it at `native/node/rfx.node`, and Electron's main process loads
+it (`electron/audio.cjs`) with no electron-rebuild step, because Node-API is ABI-stable. It is a thin, safe
+wrapper over `src/lib.rs`: device list, open/close, engine init, every deck and mixer control, and one
+`snapshot()` a frame with both playheads, the peaks, the frame counter and the underrun count. `deckLoad` and
+`probeFile` decode on the thread pool and return Promises, so a long mp3 never stalls the UI.
+
+Two engine functions exist for the app's sake. `rfx_deck_scratch_to()` is scratching by *following the hand*:
+the UI reports where the platter has put the playhead once per animation frame, and the engine measures the
+hand's speed between reports on its own clock, smooths it, and pulls toward the extrapolated hand position — so
+sixty position steps a second come out as one continuous motion (measured: 0 % speed ripple, a stop lands on
+the hand within 0.3 s). `rfx_probe_file()` reads duration, rate and channels without decoding, for the library.
+
+`npm run native:smoke` loads the addon inside Electron and runs the output for half a second;
+`node scripts/m1-check.mjs` drives the whole app on the FLX2 and measures it.

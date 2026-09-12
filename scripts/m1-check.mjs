@@ -5,9 +5,14 @@
 //   node scripts/m1-check.mjs [--seconds 60] [--wav path]
 // Sound comes out of the FLX2's master at a low level (master knob at 0.25).
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// The electron package exports the path of its binary; spawning it directly (no shell wrapper)
+// means kill() reaches the app itself.
+const electronBin = createRequire(import.meta.url)('electron');
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -16,20 +21,37 @@ const opt = (name, dflt) => {
   return i >= 0 && args[i + 1] !== undefined ? args[i + 1] : dflt;
 };
 const SECONDS = Number(opt('seconds', 60));
-const WAV = path.resolve(opt('wav', path.join(root, 'native', 'target', 'rekordfox-test-120bpm.wav')));
+// The track must outlast the run: the engine stops a deck at the end of its track (by design).
+const TRACK_SECONDS = SECONDS + 90;
+const WAV = path.resolve(opt('wav', path.join(root, 'native', 'target', `rekordfox-test-120bpm-${TRACK_SECONDS}s.wav`)));
 const PORT = 9333;
 
 if (!existsSync(WAV)) {
   mkdirSync(path.dirname(WAV), { recursive: true });
-  const gen = spawn(process.execPath, [path.join(root, 'scripts', 'make-test-wav.mjs'), WAV, '180'], { stdio: 'inherit' });
+  const gen = spawn(process.execPath, [path.join(root, 'scripts', 'make-test-wav.mjs'), WAV, String(TRACK_SECONDS)], { stdio: 'inherit' });
   await new Promise((r) => gen.on('exit', r));
 }
 
-const isWin = process.platform === 'win32';
-const electron = spawn(isWin ? 'npx.cmd' : 'npx', ['electron', '.', `--remote-debugging-port=${PORT}`], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], shell: isWin });
+const electron = spawn(electronBin, ['.', `--remote-debugging-port=${PORT}`], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
 electron.stdout.on('data', (b) => process.stdout.write(`[app] ${b}`));
-electron.stderr.on('data', (b) => process.stderr.write(`[app] ${b}`));
-const exitCode = () => new Promise((r) => electron.on('exit', r));
+electron.stderr.on('data', (b) => {
+  const line = String(b);
+  if (!/disk_cache|gpu_disk_cache/.test(line)) process.stderr.write(`[app] ${line}`);
+});
+let exited = false;
+electron.on('exit', () => {
+  exited = true;
+});
+/** Asks the app to quit (the window closes, audio stops), then insists. */
+async function closeApp() {
+  try {
+    await cdp('Browser.close');
+  } catch {
+    /* already gone */
+  }
+  for (let i = 0; i < 50 && !exited; i += 1) await new Promise((r) => setTimeout(r, 100));
+  if (!exited) electron.kill();
+}
 
 async function pageTarget() {
   for (let i = 0; i < 100; i += 1) {
@@ -59,6 +81,10 @@ ws.onmessage = (ev) => {
     pending.get(m.id)(m);
     pending.delete(m.id);
   }
+};
+ws.onclose = () => {
+  for (const settle of pending.values()) settle({ error: { message: 'the app closed the DevTools connection' } });
+  pending.clear();
 };
 const cdp = (method, params = {}) =>
   new Promise((res, rej) => {
@@ -100,15 +126,14 @@ const check = (name, ok, detail) => {
 const status = await inPage(`await __m1.waitFor(() => window.rekordfox && window.rekordfox.audio && window.rekordfox.audio.status.state === 'running', 15000); return window.rekordfox && window.rekordfox.audio ? window.rekordfox.audio.status : null;`);
 check('engine running', status && status.state === 'running', { status, note: status ? `${status.device} ${status.exclusive ? 'exclusive' : 'shared'} ${status.sampleRate} Hz ${status.channels} ch ${status.latencyMs.toFixed(2)} ms` : 'no engine' });
 if (!status || status.state !== 'running') {
-  ws.close();
-  electron.kill();
+  await closeApp();
   process.exit(1);
 }
 
 // 2. a local file on deck A
 const wavJson = JSON.stringify(WAV);
 const loaded = await inPage(`
-  __m1.dispatch({ type: 'library/add', tracks: [{ id: 'local:m1', title: 'M1 test 120 BPM', artist: 'RekordFox', genre: '', bpm: 120, key: '', durationSec: 180, firstBeatSec: 0, hue: 200, seed: 7, source: 'local', path: ${wavJson}, rating: 0, comment: '', playlists: [], addedAt: Date.now() }] });
+  __m1.dispatch({ type: 'library/add', tracks: [{ id: 'local:m1', title: 'M1 test 120 BPM', artist: 'RekordFox', genre: '', bpm: 120, key: '', durationSec: ${TRACK_SECONDS}, firstBeatSec: 0, hue: 200, seed: 7, source: 'local', path: ${wavJson}, rating: 0, comment: '', playlists: [], addedAt: Date.now() }] });
   __m1.dispatch({ type: 'deck/load', deck: 0, trackId: 'local:m1' });
   const t0 = performance.now();
   const ok = await __m1.waitFor(() => __m1.deck().engine, 15000);
@@ -139,7 +164,9 @@ const clock = await inPage(`
   const worst = samples.reduce((m, s) => Math.max(m, Math.abs(s.p - s.t)), 0);
   return { playing: __m1.deck().playing, seconds: last.t, moved: last.p, driftMs: (last.p - last.t) * 1000, worstMs: worst * 1000, underruns: rekordfox.audio.status.underruns };
 `);
-check('playhead follows the engine (no drift)', clock.playing && Math.abs(clock.driftMs) < 50 && clock.worstMs < 80, { ...clock, note: `${clock.seconds.toFixed(1)} s wall, ${clock.moved.toFixed(3)} s audio, drift ${clock.driftMs.toFixed(1)} ms, worst ${clock.worstMs.toFixed(1)} ms, underruns ${clock.underruns}` });
+check('playhead follows the engine (no drift)', clock.playing && Math.abs(clock.driftMs) < 50 && clock.worstMs < 80, { ...clock, note: `${clock.seconds.toFixed(1)} s wall, ${clock.moved.toFixed(3)} s audio, drift ${clock.driftMs.toFixed(1)} ms, worst ${clock.worstMs.toFixed(1)} ms, underruns ${clock.underruns}${clock.playing ? '' : ' — the deck stopped (end of track?)'}` });
+// The rest needs a playing deck.
+await inPage(`if (!__m1.deck().playing) __m1.dispatch({ type: 'deck/playPause', deck: 0 }); return true;`);
 
 // 5. seek
 const seek = await inPage(`
@@ -224,7 +251,5 @@ console.log(`\nreport: ${path.relative(root, file)}`);
 
 const failed = Object.values(results).filter((r) => !r.ok).length;
 console.log(failed === 0 ? 'M1 check passed' : `${failed} M1 check(s) FAILED`);
-ws.close();
-electron.kill();
-await exitCode();
+await closeApp();
 process.exit(failed === 0 ? 0 : 1);

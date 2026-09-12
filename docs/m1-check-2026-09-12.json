@@ -1,6 +1,6 @@
 {
-  "at": "2026-09-12T21:05:52.863Z",
-  "seconds": 30,
+  "at": "2026-09-12T21:21:46.036Z",
+  "seconds": 5,
   "status": {
     "state": "running",
     "device": "Line (2- DDJ-FLX2)",
@@ -36,17 +36,17 @@
     },
     "local file decoded into the engine": {
       "ok": true,
-      "note": "M1 test 120 BPM in 55 ms"
+      "note": "M1 test 120 BPM in 93 ms"
     },
     "playhead follows the engine (no drift)": {
       "ok": true,
       "playing": true,
-      "seconds": 30.231200000017882,
-      "moved": 30.227999999999998,
-      "driftMs": -3.2000000178840082,
-      "worstMs": 3.4999999999989484,
+      "seconds": 5.0295,
+      "moved": 5.032,
+      "driftMs": 2.500000000000391,
+      "worstMs": 2.500000000000391,
       "underruns": 0,
-      "note": "30.2 s wall, 30.228 s audio, drift -3.2 ms, worst 3.5 ms, underruns 0"
+      "note": "5.0 s wall, 5.032 s audio, drift 2.5 ms, worst 2.5 ms, underruns 0"
     },
     "seek is followed": {
       "ok": true,
@@ -57,13 +57,13 @@
       "ok": true,
       "inSec": 30,
       "outSec": 32,
-      "min": 30.032,
-      "max": 31.976,
-      "note": "30.00–32.00 s, seen 30.032–31.976 over 4 s"
+      "min": 30.028,
+      "max": 31.932,
+      "note": "30.00–32.00 s, seen 30.028–31.932 over 4 s"
     },
     "tempo slider changes the engine rate": {
       "ok": true,
-      "rate": 1.1005274093960693,
+      "rate": 1.1005054239126444,
       "note": "+10 % slider → 1.1005x"
     },
     "CUE stops and returns to the cue point": {
@@ -77,16 +77,16 @@
       "ok": true,
       "start": 40,
       "target": 40.99999999999994,
-      "landed": 40.99396044765146,
-      "note": "hand moved 1.000 s, engine landed -6 ms from it"
+      "landed": 40.98995388871427,
+      "note": "hand moved 1.000 s, engine landed -10 ms from it"
     },
     "channel fader gates the deck": {
       "ok": true,
-      "note": "deck peak 0.120 with the fader up, 0.0000 down"
+      "note": "deck peak 0.373 with the fader up, 0.0000 down"
     },
     "crossfader hard right removes deck A from the master": {
       "ok": true,
-      "note": "master peak 0.143 hard left, 0.0000 hard right"
+      "note": "master peak 0.067 hard left, 0.0000 hard right"
     },
     "no underruns": {
       "ok": true,

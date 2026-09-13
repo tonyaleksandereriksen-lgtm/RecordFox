@@ -1,7 +1,7 @@
 # CLAUDE.md — RekordFox
 
 Two-deck rekordbox-style Performance app for the AlphaTheta DDJ-FLX2. Owner: Tony. Windows is the primary dev machine
-(`F:\RekordFox`). Version 0.3.0. Tagline: *Dig. Cue. Mix.* Repo: github.com/tonyaleksandereriksen-lgtm/RecordFox (`main`).
+(`F:\RekordFox`). Version 0.3.1. Tagline: *Dig. Cue. Mix.* Repo: github.com/tonyaleksandereriksen-lgtm/RecordFox (`main`).
 
 ## Hard rules (from the project brief)
 - Control path is **MIDI only** (USB class-compliant). Never WebHID, never CDJ HID / libpcon / Pro DJ Link, never Serato HID/OSC.

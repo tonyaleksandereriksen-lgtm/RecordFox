@@ -104,7 +104,7 @@ export const GLOBAL_CC14: readonly Cc14Row<GlobalAbsId>[] = [
 export const GLOBAL_NOTES: readonly NoteRow<GlobalButtonId>[] = [
   { data1: 0x63, id: 'masterCue', label: 'HEADPHONE CUE (MASTER)', led: true, confidence: 'pdf' },
   { data1: 0x00, id: 'masterCueShift', label: 'SHIFT + HEADPHONE CUE (MASTER) → Smart CFX', led: true, confidence: 'unverified' },
-  { data1: 0x01, id: 'smartFader', label: 'SMART FADER', led: true, confidence: 'unverified' },
+  { data1: 0x01, id: 'smartFader', label: 'SMART FADER', led: true, confidence: 'hardware' }, // 96 01 7F / 96 01 00 seen on the unit 2026-09-13
   { data1: 0x09, id: 'smartFaderShift', label: 'SHIFT + SMART FADER', led: true, confidence: 'unverified' },
 ];
 

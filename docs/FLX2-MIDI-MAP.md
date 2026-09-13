@@ -51,7 +51,7 @@ Channels are written 1-based here (MIDI ch 1 = status nibble 0).
 |---|---|---|---|
 | HEADPHONE CUE (MASTER) | `96 63` | `96 63 7F/00` | PDF |
 | SHIFT + HEADPHONE CUE (MASTER) → Smart CFX | `96 00` | `96 00 7F/00` | **verify** |
-| SMART FADER | `96 01` | `96 01 7F/00` | **verify** |
+| SMART FADER | `96 01` | `96 01 7F/00` | hardware |
 | SHIFT + SMART FADER | `96 09` | `96 09 7F/00` | **verify** |
 | CFX (CH 1) | `B6 17` / `B6 37` (14-bit) | — | PDF |
 | CFX (CH 2) | `B6 18` / `B6 38` (14-bit) | — | PDF |

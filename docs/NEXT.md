@@ -188,6 +188,15 @@ the audio files next to the `.m3u8` and `.rekordfox.json` ✔ (M5's last bit).
 
 ## M3 — Hardware verification session (needs the unit)
 
+How to run it (set up 2026-09-13): `node scripts/midi-capture.mjs --out capture.jsonl --minutes 30`
+launches the built app and records every incoming message losslessly to a JSON-lines file (one per
+line: time, bytes, the decoder's label, its confidence); press the controls in the order below, with a
+pause between steps, then read the file. `scripts/app-attach.mjs "<expr>"` queries the running app
+(e.g. `rekordfox.midi.log.totals`) — but not while the recorder runs: a second DevTools client on the
+page closes the recorder's session. The first attempt on 2026-09-13 recorded a crossfader sweep, four
+SMART FADER presses (`96 01 7F/00` — that row is now hardware-confirmed) and PLAY presses, and none of
+the steps below, so they are still open.
+
 Work through the MIDI monitor with every control on the FLX2 and settle the rows still marked
 `family`/`unverified` in `src/midi/flx2Map.ts`:
 

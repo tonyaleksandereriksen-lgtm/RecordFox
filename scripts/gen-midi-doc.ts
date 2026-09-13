@@ -14,7 +14,7 @@ import {
 } from '../src/midi/flx2Map.ts';
 
 const h = (n: number) => n.toString(16).toUpperCase().padStart(2, '0');
-const badge = (c: string) => (c === 'pdf' ? 'PDF' : c === 'family' ? 'family' : '**verify**');
+const badge = (c: string) => (c === 'hardware' ? 'hardware' : c === 'pdf' ? 'PDF' : c === 'family' ? 'family' : '**verify**');
 const lines: string[] = [];
 const p = (s = '') => lines.push(s);
 

@@ -123,12 +123,13 @@ export function ControllerSettings() {
         <section className="card">
           <h3>Monitor legend</h3>
           <div className="legend">
+            <span className="badge hardware">hardware</span>
             <span className="badge pdf">pdf</span>
             <span className="badge family">family</span>
             <span className="badge unverified">verify</span>
             <span className="badge unmapped">unmapped</span>
           </div>
-          <p className="fine">pdf = read from the official DDJ-FLX2 MIDI list · family = FLX2 row, value from the FLX4 layout · verify = confirm on hardware · unmapped = not in the map.</p>
+          <p className="fine">hardware = seen coming from the unit · pdf = read from the official DDJ-FLX2 MIDI list · family = FLX2 row, value from the FLX4 layout · verify = confirm on hardware · unmapped = not in the map.</p>
         </section>
       </div>
     </div>

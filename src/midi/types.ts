@@ -4,6 +4,7 @@ export type DeckIndex = 0 | 1;
 
 /** Where a mapping row came from. See docs/FLX2-MIDI-MAP.md. */
 export type Confidence =
+  | 'hardware' // seen coming from the unit itself (the hardware session, docs/NEXT.md M3)
   | 'pdf' // read from the official FLX2 MIDI Message List
   | 'family' // FLX2 row exists, value follows the FLX4/DDJ-400 family layout (numbers not legible in extraction)
   | 'unverified'; // best reading of the PDF, needs a hardware check in the MIDI monitor

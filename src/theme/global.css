@@ -2075,6 +2075,7 @@ html[data-blink='1'] .tbtn[data-look='blink'] {
   justify-self: start;
   line-height: 14px;
 }
+.badge.hardware,
 .badge.pdf {
   color: var(--color-state-ok);
 }

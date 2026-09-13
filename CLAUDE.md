@@ -64,7 +64,8 @@ process only; the renderer never loads native code.
 Electron, opens the output for 0.5 s) · `node scripts/m1-check.mjs [--seconds N]` (drives the built desktop app on the
 FLX2 and measures drift, transport following, meters, underruns → `docs/m1-check-<date>.json`) · `npm run app` ·
 `npm run app:dev` · `npm run docs:midi` · `node scripts/m2-check.mjs` (imports a generated folder into the built app: tags,
-BPM, waveforms, export copies, second-launch cache → `docs/m2-check-<date>.json`).
+BPM, waveforms, export copies, second-launch cache → `docs/m2-check-<date>.json`) · `node scripts/app-eval.mjs "<expr>"` (evaluates an
+expression inside the running desktop app and prints it — `rekordfox.midi.log.entries()` for a hardware session, `@file` for a longer script).
 Windows: `start.bat` (browser, builds first), `start-desktop.bat` (Electron; builds the addon once), `dev.bat` (Vite dev).
 Native builds need `cargo`; in a shell opened before Rust was installed, prefix `export PATH="$HOME/.cargo/bin:$PATH"`.
 

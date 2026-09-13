@@ -3,12 +3,13 @@
 A rekordbox-style Performance layout (2 decks, mixer, waveforms, library) driven by an AlphaTheta **DDJ-FLX2** over
 plain USB **MIDI** — no WebHID, no CDJ/Pro DJ Link handshake, no official certification. *Dig. Cue. Mix.*
 
-**Status: 0.3.0** — the desktop app plays audio: a native engine (miniaudio, WASAPI exclusive on the DDJ-FLX2 at
+**Status: 0.3.1** — the desktop app plays audio: a native engine (miniaudio, WASAPI exclusive on the DDJ-FLX2 at
 48 kHz / 4 channels, 4 ms) drives both decks, the mixer, cue and the jog, with the audio thread as the clock. Plus the
 FLX2 MIDI driver, the rekordbox-style Performance / Library / Export / Settings screens, beat-grid editing, MIDI
 monitor, virtual controller, export to a folder, saved preferences and track edits. Add your own wav / flac / mp3
 files in the Library; the demo entries stay (generated waveforms, no sound) so everything is alive without them.
-Folder import, tags and automatic analysis (BPM, key, real waveforms) are next.
+Add a music folder and every track gets its tags, duration, BPM, key and a real waveform (analysed once, cached
+on disk), with the beat grid editable by hand; export copies the audio next to the playlist.
 
 ## Run it
 
@@ -22,15 +23,18 @@ on Windows a MIDI port can only be open in one app.
 | Browser | double-click **`start.bat`** — rebuilds (when the dev tools are installed), serves `dist/` and opens Chrome/Edge as an app window. Click **Connect FLX2** and allow MIDI. If port 5199 is busy it reuses a running RekordFox or picks the next port. |
 | Desktop app (Electron) | double-click **`start-desktop.bat`** — installs once, builds the audio engine once (needs Rust + the MSVC build tools, see `native/README.md`), rebuilds, opens the desktop window. MIDI connects automatically (SysEx allowed); audio opens the FLX2 in exclusive mode, so close rekordbox / Serato first. **Audio is desktop-only** — the browser build has no engine. |
 | Develop | **`dev.bat`** or `npm run dev` (Vite, hot reload); `npm run app:dev` (Electron + Vite). |
-| Tests | `npm run check` — type-check, 125 node tests (decoder, Web MIDI port handling, soft takeover, engine, engine clock, bridge, LED echo, library, persistence, export) and 128 native checks (DSP, device shim, engine, analysis). |
+| Tests | `npm run check` — type-check, 138 node tests (decoder, Web MIDI port handling, soft takeover, engine, engine clock, bridge, LED echo, library, persistence, export) and 128 native checks (DSP, device shim, engine, analysis). |
 | Hardware check | `node scripts/m1-check.mjs --seconds 600` — drives the built desktop app on the FLX2 for ten minutes and reports drift, transport following, meters and underruns. |
 
 ## Screens
 
 - **Performance** — Deck A | mixer | Deck B, with the Library, MIDI Monitor and Virtual FLX2 underneath. Fits a
   1280×680 laptop window; larger windows get bigger waveforms and jogs.
-- **Library** — full-height browser (collection, playlists, smart lists Favorites / Recently Added), ratings,
-  comments, playlist membership, hot cues. Drag a row onto a deck, use the **A / B** buttons, double-click, or press Enter.
+- **Library** — full-height browser (collection, playlists, smart lists Favorites / Recently Added, music folders),
+  ratings, comments, playlist membership, hot cues. **Add folder…** scans it (subfolders too), reads tags and analyses
+  every track in the background (BPM, downbeat, key — shown as "8A?" when the key is ambiguous — and the waveform);
+  the results are cached per file, so the next launch is instant. Drag a row onto a deck, use the **A / B** buttons,
+  double-click, or press Enter; Delete removes a local file from the library.
 - **Export** — pick a list and a folder (any drive, including a USB stick): writes an `.m3u8` playlist and a
   `.rekordfox.json` cue sheet (BPM, key, rating, comments, hot cues A–H). Existing files are never replaced —
   a number is added instead. Audio files are copied once real tracks can be added.
@@ -80,8 +84,9 @@ tests/                  node:test suites
 
 - **Done — audio engine (0.3.0):** 2 decks → gain/EQ/CFX/fader/crossfader → master + cue on the DDJ-FLX2 (master
   1/2, phones 3/4), laptop fallback, real meters, local files.
-- **Next — real tracks:** folder import, tags, the analyser (BPM / key / beat grid / waveform, already written in
-  `native/`) called from the app and cached; then key lock, Pad FX, slip and Smart Fader in the engine; export copies
-  audio files.
+- **Done — real tracks (0.3.1):** folder import, tags, the analyser (BPM / key / beat grid / waveform) called from
+  the app and cached, a JSON library store, export copies the audio.
+- **Next:** the hardware verification session for the MIDI rows still marked unverified; then key lock, Pad FX,
+  slip and Smart Fader in the engine.
 - **Then — streaming:** Spotify is out (its terms forbid mixing; DJ access is partner-only). Candidates and limits:
   `docs/STREAMING-OPTIONS.md`.

@@ -59,13 +59,24 @@ process only; the renderer never loads native code.
 - Long lists (MIDI monitor) are throttled (~10 fps) and virtualised — never render 600 rows.
 
 ## Commands
-`npm run check` (typecheck + 125 node tests + 128 native checks) · `npm test` · `npm run typecheck` · `npm run dev` ·
+`npm run check` (typecheck + 138 node tests + 128 native checks) · `npm test` · `npm run typecheck` · `npm run dev` ·
 `npm run build` · `npm run native` (builds the addon → `native/node/rfx.node`) · `npm run native:smoke` (loads it in
 Electron, opens the output for 0.5 s) · `node scripts/m1-check.mjs [--seconds N]` (drives the built desktop app on the
 FLX2 and measures drift, transport following, meters, underruns → `docs/m1-check-<date>.json`) · `npm run app` ·
-`npm run app:dev` · `npm run docs:midi`.
+`npm run app:dev` · `npm run docs:midi` · `node scripts/m2-check.mjs` (imports a generated folder into the built app: tags,
+BPM, waveforms, export copies, second-launch cache → `docs/m2-check-<date>.json`).
 Windows: `start.bat` (browser, builds first), `start-desktop.bat` (Electron; builds the addon once), `dev.bat` (Vite dev).
 Native builds need `cargo`; in a shell opened before Rust was installed, prefix `export PATH="$HOME/.cargo/bin:$PATH"`.
+
+## Library (from 0.3.1)
+The desktop app keeps the library in `<userData>/library.json` (the `Saved` shape from `src/lib/persist.ts`:
+prefs, folders, local tracks with their analysis, edits for demo tracks), written atomically by
+`electron/library.cjs`; the browser build keeps localStorage. Local track ids are `localTrackId(path)` (FNV-1a of
+the path) and key the analysis cache (`<userData>/analysis/<id>.json` + `.rfxwave`, checked against size + mtime).
+`src/library/controller.ts` owns import (scan → describe in batches → `library/upsert`) and the analysis queue
+(`library/analysis` per result); `engine/waveform.ts` holds the registry the canvases read (`setWaveform`,
+`onWaveformMissing`) so `engine/` stays DOM-free. A hand-corrected grid outranks a fresh analysis (it updates
+`bpmOriginal` instead). `node scripts/m2-check.mjs` drives the whole path in the built app.
 
 ## Beat grid (from 0.2.2)
 `Track.bpm` + `Track.firstBeatSec` is the whole grid. `bpmOriginal` / `firstBeatSecOriginal` hold what analysis
@@ -94,8 +105,9 @@ useless for scratching, and Chromium cannot reach WASAPI exclusive from any proc
 ## Open issues
 `docs/NEXT.md` is the working backlog (milestones with acceptance criteria, written for a Claude Code session
 running in this folder). `docs/AUDIT.md` — see the "Status — 0.2.0" section at the end for what's fixed and what's left.
-Done: M1 (the app plays audio through the FLX2 — `docs/m1-check-2026-09-13-600s.json`). Next: M2 — folders, tags and the
-analyser that already works, called from the addon; then M3 on the hardware; then Audius.
+Done: M1 (the app plays audio through the FLX2 — `docs/m1-check-2026-09-13-600s.json`), M2 (folders, tags, analysis,
+waveforms, the JSON library store — `docs/m2-check-2026-09-13.json`). Next: M3 on the hardware, then M4 (key lock,
+Pad FX, slip, Smart Fader in the engine), then Audius.
 
 ## Open items to verify on hardware
 SYNC long-press vs SHIFT+SYNC (`2A`/`5C`), SHIFT + CH CUE (`08`), ch-7 notes `96 00/01/09` (Smart CFX / Smart Fader),

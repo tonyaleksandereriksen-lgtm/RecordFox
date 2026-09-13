@@ -107,11 +107,46 @@ Left open on purpose: the Settings device list is enumerated at start, so a unit
 after **Reopen**; a stopped output (unplugged, or taken by another program) is detected within 1.5 s and
 reopened once on whatever is there.
 
-## M2 — Real tracks
+## ~~M2 — Real tracks~~ — done 2026-09-13
 
-1. **Add a music folder** (Electron dialog, recursive scan, remember it). Probe each file through the
-   native side: duration, sample rate, channels, and tags (the `lofty` crate reads id3/vorbis/flac).
-2. **Analysis — the measuring is done (2026-09-12), the wiring is not.**
+Measured by `node scripts/m2-check.mjs` (`docs/m2-check-2026-09-13.json`), which builds a temporary
+folder of generated tracks at known tempos (plus a subfolder and a stray text file), drives the built
+desktop app over the DevTools protocol and reads the library back:
+
+- The folder imported and analysed **in 256 ms**: three tracks, the subfolder included, the text file
+  ignored; titles and artists from the file names (a WAV has no tags), durations from the headers
+  (20.000 s each); **100.00 / 128.02 / 140.00 BPM against 100 / 128 / 140**, downbeats within 1 ms.
+- The analysed waveform reached the deck; the export wrote the playlist and copied the audio next to it
+  and refused to overwrite the copy that was already there.
+- **The second launch had the analysed library 150 ms after the page loaded**, nothing re-analysed.
+- On Tony's own library (40 files added in M1, analysed automatically on the first launch of this
+  build): every track analysed, no failures; the hardstyle tracks read ~150 BPM — before the tempo prior
+  one of them read 74.98. Inside the app, importing and analysing two 20 s tracks takes 158 ms end to
+  end (42 ms to import, ~50 ms per analysis); a 333 s mp3 analyses in ~0.9 s.
+- Decision: the store is a **single JSON index** (`<userData>/library.json`, written atomically) with a
+  binary waveform cache beside it (`<userData>/analysis/<id>.rfxwave` + `<id>.json`), not SQLite — no
+  database dependency in the addon, a few thousand records load in milliseconds, and the reducer's
+  in-memory array is the model anyway. The localStorage snapshot is taken over once, on the first
+  desktop launch without a file.
+- Left for later: cover art from the tags (lofty reads it; the library still draws generated artwork),
+  "re-analyse this track" (a failed or edited analysis is never redone automatically), tags for files
+  added before this build (a re-scan of their folder reads them), and the analyser's own limits — a
+  vocal stem with no beat still gets a number, and a track whose tempo drifts gets one grid.
+
+What was on the list, for the record:
+
+1. ~~**Add a music folder**~~ — Add folder… scans recursively, the folder is remembered (rescan / remove
+   in the tree), files are described in batches of 24 through lofty (tags, duration, rate, bitrate) with
+   the engine's probe as the fallback for containers lofty rejects (a streamed WAV with an unfinished
+   RIFF header, as found in Downloads).
+2. ~~**Analysis**~~ — wired: `analyze()` in the addon on the thread pool behind a mutex, a queue in
+   `electron/library.cjs` with progress streamed to the library strip (Stop button), results into
+   `Track.bpm / firstBeatSec / key`, cached per file against size + mtime, waveforms served to the
+   canvases on demand through `engine/waveform.ts`'s registry. `keyMargin` under 0.05 shows as "8A?".
+   The analyser gained a log-normal tempo prior (128 BPM, 0.6 octave) used only between octave-related
+   candidates, scored at their exact fractional lag — see the commit for why integer lags favoured the
+   half tempo. The original measuring notes follow.
+   **Analysis — the measuring is done (2026-09-12), the wiring is not.**
    `native/src/rfx_analyze.c` already produces everything the library needs from one call, and
    `run-analyze.bat` / `cargo run --release --bin rfx-analyze -- <folder>` runs it on real files today:
    BPM, first beat, key in Camelot, and the 3-band waveform at the `WaveformData` shape the decks already
@@ -138,19 +173,18 @@ reopened once on whatever is there.
    restart, and the corrected grid is what persists. Still open: a metronome click to check the grid by
    ear (needs the audio engine, so it belongs with M1), and "nudge only from here", which needs more than
    one grid marker per track.
-4. **Library storage.** Replace the localStorage snapshot with a real store (SQLite through the addon, or
-   a single JSON index if that is faster to get right) keeping ratings, comments, playlists, hot cues and
-   analysis. Migrate what localStorage already holds.
+4. ~~**Library storage.**~~ — the JSON index above; ratings, comments, playlists, hot cues, the corrected
+   grid and the analysis all live in it; localStorage migrated on first launch.
 
 Optional, once the above works: fill gaps in missing tags from an online source. AcoustID fingerprinting
 plus MusicBrainz is the open route (both have free APIs); it never overwrites what analysis measured, only
 empty title/artist/album/genre fields, and it must stay off by default since it sends fingerprints out.
 
 **Done when:** pointing at a folder fills the library with real durations, tags, waveforms, BPM and key
-*from inside the app* (the CLI already proves the numbers);
-the grid lines up with the kick on a track whose BPM drifts, and can be corrected by hand in a few
-seconds when it does not; a second launch is instant from cache; the demo tracks still load; export copies
-the audio files next to the `.m3u8` and `.rekordfox.json` (that last bit finishes M5).
+*from inside the app* ✔; the grid lines up with the kick (✔ on the real tracks) and can be corrected by
+hand in a few seconds when it does not (the GRID panel ✔; a drifting track still gets one grid — see
+above); a second launch is instant from cache ✔ (150 ms); the demo tracks still load ✔; export copies
+the audio files next to the `.m3u8` and `.rekordfox.json` ✔ (M5's last bit).
 
 ## M3 — Hardware verification session (needs the unit)
 

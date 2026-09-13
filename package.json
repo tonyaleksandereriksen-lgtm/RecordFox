@@ -1,7 +1,7 @@
 {
   "name": "rekordfox",
   "productName": "RekordFox",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Two-deck DJ performance app for the AlphaTheta DDJ-FLX2 (MIDI).",
   "type": "module",

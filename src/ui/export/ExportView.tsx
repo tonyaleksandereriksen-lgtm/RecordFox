@@ -2,9 +2,12 @@ import { useMemo, useState } from 'react';
 import { APP_NAME } from '../../brand.ts';
 import { COLLECTION, tracksInView, viewName } from '../../engine/library.ts';
 import { formatTime } from '../../lib/format.ts';
-import { CUESHEET_EXT, PLAYLIST_EXT, buildExportFiles, safeFileName, uniqueBase, type ExportFile } from '../../lib/exporter.ts';
+import { CUESHEET_EXT, PLAYLIST_EXT, buildExportFiles, planCopies, safeFileName, uniqueBase, type ExportFile } from '../../lib/exporter.ts';
+import { libraryHost } from '../../library/host.ts';
 import { Icon } from '../common/Icon.tsx';
 import { dispatch, useEngine } from '../hooks.ts';
+
+const baseName = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
 
 /** Minimal File System Access types (not all are in lib.dom yet). */
 interface Writable {
@@ -56,18 +59,32 @@ export function ExportView() {
   const [source, setSource] = useState(COLLECTION);
   const [name, setName] = useState<string | null>(null);
   const [dir, setDir] = useState<DirHandle | null>(null);
+  /** Desktop app: a plain folder path; the main process writes and copies. */
+  const [dirPath, setDirPath] = useState<string | null>(null);
   const [withPlaylist, setWithPlaylist] = useState(true);
   const [withCues, setWithCues] = useState(true);
+  const [withAudio, setWithAudio] = useState(true);
+  const fileHost = libraryHost();
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState<LogLine[]>([]);
   const lib = { tracks, playlists };
   const rows = useMemo(() => tracksInView({ tracks, playlists }, source), [tracks, playlists, source]);
   const fileBase = safeFileName(name ?? viewName(lib, source));
-  const picker = canPickFolder();
+  const picker = !!fileHost || canPickFolder();
+  const localCount = rows.filter((t) => t.source === 'local' && t.path).length;
+  const destName = fileHost ? (dirPath ? baseName(dirPath) : null) : dir ? dir.name : null;
 
   const note = (text: string, tone: LogLine['tone'] = 'info') => setLog((l) => [{ id: ++logSeq, text, tone }, ...l].slice(0, 20));
 
   const pick = async () => {
+    if (fileHost) {
+      const p = await fileHost.pickExportFolder();
+      if (p) {
+        setDirPath(p);
+        note(`Folder chosen: ${p}`);
+      }
+      return;
+    }
     try {
       const h = await (window as PickerWindow).showDirectoryPicker!({ id: 'rekordfox-export', mode: 'readwrite', startIn: 'music' });
       setDir(h);
@@ -83,7 +100,18 @@ export function ExportView() {
     const exts = [withPlaylist && PLAYLIST_EXT, withCues && CUESHEET_EXT].filter((x): x is string => !!x);
     const listName = viewName(lib, source);
     try {
-      if (dir) {
+      if (fileHost && dirPath) {
+        const taken = await fileHost.listDir(dirPath);
+        const base = uniqueBase(fileBase, exts, taken);
+        const plan = withAudio ? planCopies(rows, taken) : null;
+        const files = buildExportFiles(rows, { name: listName, app: APP_NAME, base, playlist: withPlaylist, cueSheet: withCues, pathFor: plan?.pathFor });
+        const r = await fileHost.exportWrite({ dir: dirPath, files: files.map((f) => ({ name: f.name, text: f.text })), copies: plan?.copies ?? [] });
+        if (base !== fileBase) note(`“${fileBase}” already exists there — saved as “${base}” instead.`, 'warn');
+        note(`Wrote ${r.written.join(' and ')} to ${baseName(dirPath)}`, 'ok');
+        if (plan) note(`Copied ${r.copied.length} of ${plan.copies.length} audio file${plan.copies.length === 1 ? '' : 's'}${localCount < rows.length ? ` (${rows.length - localCount} demo track${rows.length - localCount === 1 ? ' has' : 's have'} no file)` : ''}`, r.failed.length ? 'warn' : 'ok');
+        for (const f of r.failed) note(`${f.file}: ${f.error}`, 'warn');
+        dispatch({ type: 'ui/toast', text: `Exported ${rows.length} tracks to ${baseName(dirPath)}`, tone: r.failed.length ? 'warn' : 'ok' });
+      } else if (dir) {
         if (dir.queryPermission && (await dir.queryPermission({ mode: 'readwrite' })) !== 'granted') {
           if (!dir.requestPermission || (await dir.requestPermission({ mode: 'readwrite' })) !== 'granted') throw new Error('Write permission for the folder was not granted.');
         }
@@ -169,10 +197,10 @@ export function ExportView() {
         <h3 className="section-label">Destination</h3>
         {picker ? (
           <>
-            <button className="btn folder-btn" onClick={pick}>
-              <Icon name="folder" /> {dir ? dir.name : 'Choose a folder…'}
+            <button className="btn folder-btn" onClick={pick} title={dirPath ?? undefined}>
+              <Icon name="folder" /> {destName ?? 'Choose a folder…'}
             </button>
-            <p className="fine">{dir ? 'Existing files are never replaced — a number is added to the name instead.' : 'Pick any folder on this computer or a USB stick.'}</p>
+            <p className="fine">{destName ? 'Existing files are never replaced — a number is added to the name instead.' : 'Pick any folder on this computer or a USB stick.'}</p>
           </>
         ) : (
           <p className="fine">This browser can’t write to a folder directly; the files go to your Downloads folder instead.</p>
@@ -200,10 +228,24 @@ export function ExportView() {
             Cue sheet <span className="mono dim">{fileBase + CUESHEET_EXT}</span>
           </span>
         </label>
-        <p className="fine">The cue sheet keeps BPM, key, rating, comments and hot cues A–H. Audio files are copied too once real tracks can be added (next slice) — the demo tracks have no audio.</p>
+        {fileHost && (
+          <label className="check-row">
+            <input type="checkbox" checked={withAudio} onChange={() => setWithAudio(!withAudio)} />
+            <span className="checkbox" aria-hidden="true">
+              <Icon name="check" size={10} />
+            </span>
+            <span>
+              Audio files <span className="mono dim">{localCount} of {rows.length}</span>
+            </span>
+          </label>
+        )}
+        <p className="fine">
+          The cue sheet keeps BPM, key, rating, comments and hot cues A–H.{' '}
+          {fileHost ? 'Audio files are copied next to it under the names the playlist uses; demo tracks have no file.' : 'Copying the audio files needs the desktop app.'}
+        </p>
 
-        <button className="btn primary export-go" disabled={!ready || busy || (picker && !dir)} onClick={doExport}>
-          <Icon name="export" /> {busy ? 'Exporting…' : picker ? (dir ? `Export to ${dir.name}` : 'Choose a folder first') : 'Download files'}
+        <button className="btn primary export-go" disabled={!ready || busy || (picker && !destName)} onClick={doExport}>
+          <Icon name="export" /> {busy ? 'Exporting…' : picker ? (destName ? `Export to ${destName}` : 'Choose a folder first') : 'Download files'}
         </button>
 
         {log.length > 0 && (

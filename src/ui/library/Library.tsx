@@ -14,30 +14,64 @@ import { dispatch, useEngine, useHost } from '../hooks.ts';
 import { TrackWave } from '../waveform/Overview.tsx';
 import { APP_TAGLINE } from '../../brand.ts';
 import { audioHost } from '../../audio/host.ts';
-import { addActions, pickLocalFiles } from '../../audio/localFiles.ts';
+import { library } from '../../runtime.ts';
+import { keyLabel } from '../../library/tracks.ts';
 
-/** Desktop only: pick audio files, probe them through the engine, add them to the library. */
-function AddFiles() {
-  const { audio } = useHost();
+/** Desktop only: pick audio files or a folder; tags, duration and analysis follow through the controller. */
+function AddButtons() {
   const [busy, setBusy] = useState(false);
   const host = audioHost();
-  if (!host || audio.state === 'unavailable') return null;
+  const lib = library;
+  if (!host || !lib) return null;
+  const run = (job: () => Promise<void>) => {
+    setBusy(true);
+    job()
+      .catch((e) => dispatch({ type: 'ui/toast', text: `Could not add: ${String((e as Error)?.message ?? e)}`, tone: 'warn' }))
+      .finally(() => setBusy(false));
+  };
   return (
-    <button
-      className="btn"
-      disabled={busy}
-      onClick={() => {
-        setBusy(true);
-        pickLocalFiles(host)
-          .then((r) => addActions(r).forEach(dispatch))
-          .catch((e) => dispatch({ type: 'ui/toast', text: `Could not add files: ${String((e as Error)?.message ?? e)}`, tone: 'warn' }))
-          .finally(() => setBusy(false));
-      }}
-      title="Add wav, flac or mp3 files from this computer"
-    >
-      <Icon name="folder" /> Add files…
-    </button>
+    <>
+      <button className="btn" disabled={busy} onClick={() => run(() => lib.addFolder())} title="Add a folder: every wav, flac and mp3 in it, with subfolders">
+        <Icon name="folder" /> Add folder…
+      </button>
+      <button className="btn" disabled={busy} onClick={() => run(async () => lib.addFiles(await host.pickFiles()))} title="Add single wav, flac or mp3 files">
+        <Icon name="file" /> Add files…
+      </button>
+    </>
   );
+}
+
+/** Folder import and analysis, while they run. */
+function ImportStrip() {
+  const p = useHost().library;
+  if (p.phase === 'idle') return null;
+  const text =
+    p.phase === 'scanning'
+      ? `Scanning ${p.current ?? ''}…`
+      : p.phase === 'reading'
+        ? `Reading files ${p.done} / ${p.total}…`
+        : `Analysing ${Math.min(p.done + 1, p.total)} / ${p.total}${p.current ? ` — ${p.current}` : ''}`;
+  const frac = p.total > 0 ? Math.min(1, p.done / p.total) : 0;
+  return (
+    <div className="import-strip" role="status" aria-live="polite">
+      <span className="ellipsis">{text}</span>
+      <span className="import-bar" aria-hidden="true">
+        <span style={{ width: `${Math.round(frac * 100)}%` }} />
+      </span>
+      {p.phase === 'analysing' && (
+        <button className="mini" onClick={() => void library?.cancel()} title="Stop analysing (what is done stays)">
+          Stop
+        </button>
+      )}
+    </div>
+  );
+}
+
+function bpmText(t: Track, analysing: boolean): string {
+  if (t.bpm > 0) return t.bpm.toFixed(2);
+  if (t.source !== 'local') return '—';
+  if (t.analysisError) return '?';
+  return analysing ? '…' : '—';
 }
 
 const playlistIcon = (p: Playlist): IconName => (p.smart === 'favorites' ? 'star' : p.smart === 'recent' ? 'clock' : 'playlist');
@@ -52,9 +86,12 @@ function loadToFree(trackId: string) {
   load(!s.decks[0].playing ? 0 : !s.decks[1].playing ? 1 : 0, trackId);
 }
 
+const folderName = (f: string) => f.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || f;
+
 function Tree() {
   const tracks = useEngine((s) => s.library.tracks);
   const playlists = useEngine((s) => s.library.playlists);
+  const folders = useEngine((s) => s.library.folders);
   const view = useEngine((s) => s.library.view);
   const lib = { tracks, playlists };
   const item = (id: string, label: string, icon: IconName, count: number, indent = false) => (
@@ -80,13 +117,28 @@ function Tree() {
         <span className="soon">soon</span>
       </button>
       <div className="tree-group">
-        <Icon name="device" /> Local files
+        <Icon name="device" /> Music folders
       </div>
-      <button className="tree-item indent" disabled title="Adding music folders arrives with the audio engine (slice 2)">
-        <Icon name="folder" />
-        <span className="tree-name">Add a music folder</span>
-        <span className="soon">slice 2</span>
-      </button>
+      {folders.map((f) => (
+        <div key={f} className="tree-item indent folder-item" title={f}>
+          <Icon name="folder" />
+          <span className="tree-name ellipsis">{folderName(f)}</span>
+          <span className="tree-count mono">{tracks.filter((t) => t.path && t.path.startsWith(f)).length}</span>
+          <button className="tree-mini" onClick={() => void library?.importFolder(f)} title="Rescan this folder for new files">
+            ↻
+          </button>
+          <button className="tree-mini" onClick={() => void library?.removeFolder(f)} title="Remove this folder and its tracks from the library (files stay on disk)">
+            ×
+          </button>
+        </div>
+      ))}
+      {folders.length === 0 && (
+        <button className="tree-item indent" disabled={!library} onClick={() => void library?.addFolder()} title={library ? 'Add a folder of wav, flac or mp3 files' : 'Folders need the desktop app'}>
+          <Icon name="folder" />
+          <span className="tree-name">Add a music folder</span>
+          {!library && <span className="soon">desktop</span>}
+        </button>
+      )}
       <div className="tree-brand" aria-hidden="true">
         <Mark size={30} />
         <Wordmark height={9} />
@@ -96,7 +148,7 @@ function Tree() {
   );
 }
 
-function Row({ t, i, selected, onDeck }: { t: Track; i: number; selected: boolean; onDeck: [boolean, boolean] }) {
+function Row({ t, i, selected, onDeck, analysing }: { t: Track; i: number; selected: boolean; onDeck: [boolean, boolean]; analysing: boolean }) {
   return (
     <div
       role="row"
@@ -125,8 +177,12 @@ function Row({ t, i, selected, onDeck }: { t: Track; i: number; selected: boolea
         <span className="ellipsis">{t.title}</span>
       </span>
       <span className="c-artist ellipsis">{t.artist}</span>
-      <span className="c-key">{t.key}</span>
-      <span className="c-bpm mono">{t.bpm.toFixed(2)}</span>
+      <span className="c-key" title={t.keyName ? `${t.keyName}${t.keyMargin !== undefined && t.keyMargin < 0.05 ? ' — ambiguous, could be its relative' : ''}` : undefined}>
+        {keyLabel(t)}
+      </span>
+      <span className="c-bpm mono" title={t.analysisError ? `Analysis failed: ${t.analysisError}` : undefined}>
+        {bpmText(t, analysing)}
+      </span>
       <span className="c-len mono">{formatTime(t.durationSec, false)}</span>
       <span className="c-genre ellipsis">{t.genre}</span>
       <span className="c-rating">
@@ -161,6 +217,7 @@ function TrackTable() {
   const selected = useEngine((s) => s.library.selectedId);
   const on0 = useEngine((s) => s.decks[0].track?.id ?? null);
   const on1 = useEngine((s) => s.decks[1].track?.id ?? null);
+  const analysing = useHost().library.phase !== 'idle';
   const rows = useMemo(() => searchTracks(tracksInView({ tracks, playlists }, view), query), [tracks, playlists, view, query]);
   const body = useRef<HTMLDivElement>(null);
 
@@ -202,8 +259,9 @@ function TrackTable() {
         <span className="search-count mono">
           {rows.length} / {tracks.length}
         </span>
-        <AddFiles />
+        <AddButtons />
       </div>
+      <ImportStrip />
       <div className="table" role="grid" aria-label="Tracks" aria-rowcount={rows.length} tabIndex={0} onKeyDown={onKey} title="Enter loads onto a free deck · Delete removes a local file from the library">
         <div className="tr head" role="row">
           <span className="c-num">#</span>
@@ -219,7 +277,7 @@ function TrackTable() {
         </div>
         <div className="tbody" ref={body}>
           {rows.map((t, i) => (
-            <Row key={t.id} t={t} i={i} selected={t.id === selected} onDeck={[on0 === t.id, on1 === t.id]} />
+            <Row key={t.id} t={t} i={i} selected={t.id === selected} onDeck={[on0 === t.id, on1 === t.id]} analysing={analysing} />
           ))}
           {rows.length === 0 && <div className="table-empty">{query ? `Nothing matches “${query}”.` : 'This playlist is empty — tick it in a track’s detail panel to add tracks.'}</div>}
         </div>
@@ -273,12 +331,23 @@ function Detail() {
       <Artwork track={track} className="detail-art" />
       <div className="detail-title">{track.title}</div>
       <div className="detail-artist">{track.artist}</div>
-      <div className="detail-genre">{track.genre}</div>
+      <div className="detail-genre">
+        {[track.album, track.year ? String(track.year) : '', track.genre].filter(Boolean).join(' · ')}
+      </div>
       <div className="detail-nums">
-        <span>{track.key}</span>
-        <span className="mono">{track.bpm.toFixed(2)}</span>
+        <span title={track.keyName}>{keyLabel(track)}</span>
+        <span className="mono">{track.bpm > 0 ? track.bpm.toFixed(2) : '—'}</span>
         <span className="mono detail-len">{formatTime(track.durationSec, false)}</span>
       </div>
+      {track.source === 'local' && (
+        <div className="fine detail-file">
+          {track.analysisError
+            ? `Analysis failed: ${track.analysisError}`
+            : track.analysedAt
+              ? `${track.keyName ?? ''}${track.keyMargin !== undefined && track.keyMargin < 0.05 ? ' (ambiguous)' : ''} · ${track.bpmOriginal !== undefined ? 'grid corrected by hand' : 'analysed'}${track.sampleRate ? ` · ${track.sampleRate / 1000} kHz` : ''}${track.bitrateKbps ? ` · ${track.bitrateKbps} kbps` : ''}`
+              : 'Not analysed yet'}
+        </div>
+      )}
       <TrackWave track={track} color={tokens.color.deck[0]} />
       <div className="detail-section">
         <span className="section-label">Rating</span>

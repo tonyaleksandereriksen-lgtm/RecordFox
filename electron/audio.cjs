@@ -228,4 +228,4 @@ function shutdownSync() {
   status = { state: 'idle' };
 }
 
-module.exports = { registerAudio, startAudio, reopenAudio, stopAudio, shutdownSync, available: rfx !== null };
+module.exports = { registerAudio, startAudio, reopenAudio, stopAudio, shutdownSync, available: rfx !== null, addon: rfx };

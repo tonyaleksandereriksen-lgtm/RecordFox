@@ -1,6 +1,19 @@
 import type { PadMode } from '../midi/types.ts';
 import type { BottomTab, DeckIndex, Prefs, SettingsSection, Track, TrackEdits, View } from './types.ts';
 
+/** What the analyser reports for one file (see electron/library.cjs and native/src/rfx_analyze.h). */
+export interface AnalysisResult {
+  bpm: number;
+  firstBeatSec: number;
+  /** Camelot code, e.g. "8A". */
+  key: string;
+  keyName: string;
+  keyMargin: number;
+  bpmConfidence: number;
+  durationSec: number;
+  analysedAt: number;
+}
+
 export type ChannelParam = 'trim' | 'eqHi' | 'eqMid' | 'eqLow' | 'cfx' | 'fader';
 export type MasterParam = 'masterLevel' | 'phonesLevel' | 'phonesMix';
 export type JogMode = 'scratch' | 'bend' | 'search';
@@ -70,8 +83,16 @@ export type EngineAction =
   | { type: 'library/hydrate'; edits: Record<string, TrackEdits> }
   /** Adds tracks (local files) that are not in the library yet. */
   | { type: 'library/add'; tracks: Track[] }
+  /** Adds new local tracks and replaces existing ones by id (a re-scan that re-read a file). */
+  | { type: 'library/upsert'; tracks: Track[] }
   /** Removes local tracks from the library (not the files). A track on a deck stays until ejected. */
   | { type: 'library/remove'; trackIds: string[] }
+  /** Analysis came back for a local track (from the analyser or its cache). */
+  | { type: 'library/analysis'; trackId: string; result: AnalysisResult }
+  /** Analysis failed for a local track; it keeps playing without a grid. */
+  | { type: 'library/analysisFailed'; trackId: string; error: string }
+  /** The music folders (absolute paths). */
+  | { type: 'library/folders'; folders: string[] }
   | { type: 'prefs/set'; patch: Partial<Prefs> }
   | { type: 'ui/view'; view: View }
   | { type: 'ui/bottomTab'; tab: BottomTab }

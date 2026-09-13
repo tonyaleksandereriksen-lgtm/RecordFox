@@ -10,8 +10,10 @@ const KEY = 'rekordfox.state.v1';
 export interface Saved {
   prefs?: Partial<Prefs>;
   tracks?: Record<string, TrackEdits>;
-  /** Local files added to the library (M1); the M2 library store replaces this. */
+  /** Local files in the library, full records (analysis included). */
   local?: Track[];
+  /** Music folders added on this machine. */
+  folders?: string[];
 }
 
 type StorageLike = Pick<Storage, 'getItem' | 'setItem'>;
@@ -39,7 +41,14 @@ export function snapshot(s: EngineState): Saved {
     tracks[t.id] = edits;
   }
   const local = s.library.tracks.filter((t) => t.source === 'local' && typeof t.path === 'string');
-  return local.length ? { prefs: s.prefs, tracks, local } : { prefs: s.prefs, tracks };
+  const out: Saved = { prefs: s.prefs, tracks };
+  if (local.length) out.local = local;
+  if (s.library.folders.length) out.folders = s.library.folders;
+  return out;
+}
+
+export function savedFolders(saved: Saved): string[] {
+  return Array.isArray(saved.folders) ? saved.folders.filter((f): f is string => typeof f === 'string' && f.length > 0) : [];
 }
 
 /** Local tracks from a saved snapshot, keeping only records that still look like tracks. */

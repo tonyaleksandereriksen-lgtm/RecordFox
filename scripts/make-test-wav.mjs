@@ -1,13 +1,13 @@
 // Writes a test track: 48 kHz stereo 16-bit WAV, 120 BPM clicks (a thump on the downbeat) over a
 // soft tone that steps up 5 Hz every bar. Used by the M1 check and handy for listening tests.
-//   node scripts/make-test-wav.mjs [out.wav] [seconds]
+//   node scripts/make-test-wav.mjs [out.wav] [seconds] [bpm]
 import { writeFileSync } from 'node:fs';
 
 const out = process.argv[2] ?? 'rekordfox-test-120bpm.wav';
 const seconds = Number(process.argv[3] ?? 120);
+const bpm = Number(process.argv[4] ?? 120);
 const rate = 48000;
 const frames = Math.floor(seconds * rate);
-const bpm = 120;
 const beat = 60 / bpm;
 const data = Buffer.alloc(frames * 4);
 

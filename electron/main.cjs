@@ -11,6 +11,7 @@ const { app, BrowserWindow, net, protocol, session, shell } = require('electron'
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const audio = require('./audio.cjs');
+const library = require('./library.cjs');
 
 const DEV_URL = process.env.REKORDFOX_DEV_URL; // e.g. http://localhost:5173 (see scripts/app-dev.mjs)
 const DIST = path.join(__dirname, '..', 'dist');
@@ -105,6 +106,7 @@ app.whenReady().then(() => {
   ses.setDevicePermissionHandler?.(() => false); // no WebHID/WebUSB/serial: the FLX2 is MIDI-only
 
   audio.registerAudio(() => mainWindow);
+  library.registerLibrary(() => mainWindow);
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

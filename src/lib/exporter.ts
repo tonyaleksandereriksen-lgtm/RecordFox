@@ -1,7 +1,8 @@
 /**
  * Export to a folder the user picks on disk: an extended M3U8 playlist plus a JSON cue sheet
- * (BPM, key, rating, comment, hot cues). Audio files are copied too once the library holds real
- * files (slice 2). Pure builders here; the UI does the folder picking and writing.
+ * (BPM, key, rating, comment, hot cues), and — in the desktop app — the audio files themselves,
+ * copied next to them under the names the playlist uses. Pure builders here; the UI does the
+ * folder picking and the main process does the writing.
  */
 import type { Track } from '../engine/types.ts';
 
@@ -20,7 +21,41 @@ export function safeFileName(name: string): string {
 }
 
 export function defaultPath(t: Track): string {
-  return `${safeFileName(`${t.artist} - ${t.title}`)}.mp3`;
+  return `${safeFileName(`${t.artist} - ${t.title}`)}.${fileExt(t)}`;
+}
+
+/** The track's own extension for a local file; demo tracks pretend to be mp3s. */
+export function fileExt(t: Track): string {
+  const m = t.path ? /\.([A-Za-z0-9]+)$/.exec(t.path) : null;
+  return m ? m[1].toLowerCase() : 'mp3';
+}
+
+export interface CopyPlan {
+  /** Folder-relative name each track is written as in the playlist and cue sheet. */
+  pathFor: (t: Track) => string;
+  /** Local files to copy, in playlist order. Demo tracks have nothing to copy. */
+  copies: { from: string; to: string }[];
+}
+
+/**
+ * Names for the copied audio: "Artist - Title.ext", made unique against what is already in the
+ * folder and against each other ("(2)", "(3)"…), so an export never replaces a file.
+ */
+export function planCopies(tracks: readonly Track[], taken: Iterable<string>): CopyPlan {
+  const used = new Set([...taken].map((n) => n.toLowerCase()));
+  const names = new Map<string, string>();
+  const copies: { from: string; to: string }[] = [];
+  for (const t of tracks) {
+    if (names.has(t.id)) continue;
+    const base = safeFileName(`${t.artist} - ${t.title}`);
+    const ext = `.${fileExt(t)}`;
+    let name = `${base}${ext}`;
+    for (let n = 2; used.has(name.toLowerCase()) && n < 1000; n += 1) name = `${base} (${n})${ext}`;
+    used.add(name.toLowerCase());
+    names.set(t.id, name);
+    if (t.source === 'local' && t.path) copies.push({ from: t.path, to: name });
+  }
+  return { pathFor: (t) => names.get(t.id) ?? defaultPath(t), copies };
 }
 
 export function buildM3u8(tracks: readonly Track[], opts: ExportOptions): string {
@@ -83,12 +118,12 @@ export interface ExportFile {
 
 export function buildExportFiles(
   tracks: readonly Track[],
-  opts: { name: string; app: string; base: string; playlist: boolean; cueSheet: boolean; exportedAt?: string },
+  opts: { name: string; app: string; base: string; playlist: boolean; cueSheet: boolean; exportedAt?: string; pathFor?: (t: Track) => string },
 ): ExportFile[] {
   const files: ExportFile[] = [];
-  if (opts.playlist) files.push({ name: `${opts.base}${PLAYLIST_EXT}`, type: 'audio/x-mpegurl', text: buildM3u8(tracks, { name: opts.name }) });
+  if (opts.playlist) files.push({ name: `${opts.base}${PLAYLIST_EXT}`, type: 'audio/x-mpegurl', text: buildM3u8(tracks, { name: opts.name, pathFor: opts.pathFor }) });
   if (opts.cueSheet) {
-    const sheet = buildCueSheet(tracks, { name: opts.name, app: opts.app, exportedAt: opts.exportedAt });
+    const sheet = buildCueSheet(tracks, { name: opts.name, app: opts.app, exportedAt: opts.exportedAt, pathFor: opts.pathFor });
     files.push({ name: `${opts.base}${CUESHEET_EXT}`, type: 'application/json', text: JSON.stringify(sheet, null, 2) + '\n' });
   }
   return files;

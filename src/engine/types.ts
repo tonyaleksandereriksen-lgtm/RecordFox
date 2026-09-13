@@ -32,6 +32,21 @@ export interface Track {
   source: 'demo' | 'local' | 'stream';
   /** Absolute path on disk for local files — what the native engine decodes. */
   path?: string;
+  /** From the file's tags, when it has them. */
+  album?: string;
+  year?: number;
+  /** File identity for the analysis cache: a changed file is analysed again. */
+  fileSize?: number;
+  fileMtime?: number;
+  sampleRate?: number;
+  bitrateKbps?: number;
+  /** Analysis provenance. `keyMargin` small (< 0.05) means the key is ambiguous (relative major/minor). */
+  analysedAt?: number;
+  bpmConfidence?: number;
+  keyName?: string;
+  keyMargin?: number;
+  /** Set when analysis failed; the track still plays. */
+  analysisError?: string;
   /** Hot cues A–H in seconds; saved with the library. */
   cues?: (number | null)[];
   rating: number; // 0..5
@@ -143,6 +158,8 @@ export interface SamplerState {
 export interface LibraryState {
   tracks: Track[];
   playlists: Playlist[];
+  /** Music folders added on this machine (absolute paths); rescanned on request. */
+  folders: string[];
   selectedId: string | null;
   /** 'collection' or a playlist id */
   view: string;

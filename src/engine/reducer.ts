@@ -711,6 +711,27 @@ function reduceAction(s: EngineState, a: EngineAction): EngineState {
       return { ...s, library: { ...s.library, tracks: [...s.library.tracks, ...fresh], selectedId: fresh[0].id } };
     }
 
+    case 'library/upsert': {
+      const incoming = new Map<string, Track>();
+      for (const t of a.tracks) if (t.source === 'local') incoming.set(t.id, t);
+      if (incoming.size === 0) return s;
+      const seen = new Set<string>();
+      const tracks = s.library.tracks.map((t) => {
+        const r = incoming.get(t.id);
+        if (r) seen.add(t.id);
+        return r ?? t;
+      });
+      let first: string | null = null;
+      for (const t of incoming.values()) {
+        if (seen.has(t.id)) continue;
+        tracks.push(t);
+        first ??= t.id;
+      }
+      // A deck holding a replaced track keeps playing; its copy picks up the new tags and analysis.
+      const decks = s.decks.map((d) => (d.track && incoming.has(d.track.id) ? { ...d, track: incoming.get(d.track.id)! } : d)) as [DeckState, DeckState];
+      return { ...s, decks, library: { ...s.library, tracks, selectedId: s.library.selectedId ?? first } };
+    }
+
     case 'library/remove': {
       const onDeck = new Set(s.decks.map((d) => d.track?.id).filter((id): id is string => !!id));
       const gone = new Set(a.trackIds.filter((id) => !onDeck.has(id)));
@@ -720,6 +741,45 @@ function reduceAction(s: EngineState, a: EngineAction): EngineState {
       if (tracks.length === s.library.tracks.length) return s;
       const selectedId = s.library.selectedId && gone.has(s.library.selectedId) ? null : s.library.selectedId;
       return { ...s, library: { ...s.library, tracks, selectedId } };
+    }
+
+    case 'library/analysis': {
+      const t = s.library.tracks.find((x) => x.id === a.trackId);
+      if (!t || t.source !== 'local') return s;
+      const r = a.result;
+      const bpm = r.bpm > 0 && Number.isFinite(r.bpm) ? Math.round(r.bpm * 100) / 100 : 0;
+      const firstBeatSec = Number.isFinite(r.firstBeatSec) && r.firstBeatSec >= 0 ? r.firstBeatSec : 0;
+      const edited = t.bpmOriginal !== undefined;
+      const patch: Partial<Track> = {
+        key: r.key || '',
+        keyName: r.keyName || undefined,
+        keyMargin: r.keyMargin,
+        bpmConfidence: r.bpmConfidence,
+        analysedAt: r.analysedAt,
+        analysisError: undefined,
+      };
+      if (r.durationSec > 0 && Math.abs(r.durationSec - t.durationSec) > 0.05) patch.durationSec = r.durationSec;
+      // A grid the DJ corrected by hand outranks a fresh analysis; the analysis becomes what RESET restores.
+      if (edited) {
+        patch.bpmOriginal = bpm;
+        patch.firstBeatSecOriginal = firstBeatSec;
+      } else {
+        patch.bpm = bpm;
+        patch.firstBeatSec = firstBeatSec;
+      }
+      return updateTrack(s, a.trackId, patch);
+    }
+
+    case 'library/analysisFailed': {
+      const t = s.library.tracks.find((x) => x.id === a.trackId);
+      if (!t || t.source !== 'local') return s;
+      return updateTrack(s, a.trackId, { analysisError: a.error.slice(0, 200) });
+    }
+
+    case 'library/folders': {
+      const folders = Array.from(new Set(a.folders.filter((f) => typeof f === 'string' && f.length > 0)));
+      const same = folders.length === s.library.folders.length && folders.every((f, i) => f === s.library.folders[i]);
+      return same ? s : { ...s, library: { ...s.library, folders } };
     }
 
     case 'library/hydrate': {

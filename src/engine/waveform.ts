@@ -15,20 +15,68 @@ export interface WaveformData {
 }
 
 const cache = new Map<string, WaveformData>();
+/** Real waveforms from analysis, by track id; the desktop shell fills this from its cache on demand. */
+const real = new Map<string, WaveformData>();
+let missing: ((track: Track) => void) | null = null;
 
+/**
+ * The waveform to draw for a track: the analysed one when it is here, else a generated one (demo
+ * tracks) or an even placeholder (a local file whose analysis has not arrived). Asking for a local
+ * track's missing waveform notifies the loader once, so the canvases just keep drawing.
+ */
 export function waveformFor(track: Track): WaveformData {
+  const r = real.get(track.id);
+  if (r) return r;
   let w = cache.get(track.id);
   if (!w) {
     w = track.source === 'local' ? placeholderWaveform(track) : generateDemoWaveform(track);
     cache.set(track.id, w);
   }
+  if (track.source === 'local' && missing) missing(track);
   return w;
 }
 
-/** Analysis (M2) replaces this: until then a local file shows an even, quiet band so the playhead has something to cross. */
+export function setWaveform(id: string, data: WaveformData): void {
+  real.set(id, data);
+  cache.delete(id);
+}
+
+export function hasWaveform(id: string): boolean {
+  return real.has(id);
+}
+
+export function forgetWaveform(id: string): void {
+  real.delete(id);
+  cache.delete(id);
+}
+
+/** Registers the loader called for a local track that has no analysed waveform yet (at most once per call site's own dedupe). */
+export function onWaveformMissing(fn: ((track: Track) => void) | null): void {
+  missing = fn;
+}
+
+/** An even, quiet band for a local file whose analysis has not arrived, so the playhead has something to cross. */
 export function placeholderWaveform(track: Track, binsPerSec = 100): WaveformData {
   const n = Math.max(1, Math.ceil(track.durationSec * binsPerSec));
   return { binsPerSec, length: n, low: new Uint8Array(n).fill(70), mid: new Uint8Array(n).fill(48), high: new Uint8Array(n).fill(30) };
+}
+
+/**
+ * Decodes an `.rfxwave` file: low, mid, high bytes per bin, 100 bins a second, nothing else
+ * (the analyser's own layout, see native/src/rfx_analyze.h). Returns null for an empty or odd-sized buffer.
+ */
+export function waveformFromBytes(bytes: Uint8Array, binsPerSec = 100): WaveformData | null {
+  const n = Math.floor(bytes.length / 3);
+  if (n === 0) return null;
+  const low = new Uint8Array(n);
+  const mid = new Uint8Array(n);
+  const high = new Uint8Array(n);
+  for (let i = 0; i < n; i += 1) {
+    low[i] = bytes[i * 3];
+    mid[i] = bytes[i * 3 + 1];
+    high[i] = bytes[i * 3 + 2];
+  }
+  return { binsPerSec, length: n, low, mid, high };
 }
 
 export function generateDemoWaveform(track: Track, binsPerSec = 100): WaveformData {

@@ -67,7 +67,7 @@ export function initialState(prefs: Prefs = DEFAULT_PREFS): EngineState {
       smartCfx: false,
     },
     sampler: { slots, playing: slots.map(() => false), startedAt: slots.map(() => 0) },
-    library: { tracks: buildDemoTracks(), playlists: DEMO_PLAYLISTS, selectedId: 'demo-1', view: 'collection', query: '' },
+    library: { tracks: buildDemoTracks(), playlists: DEMO_PLAYLISTS, folders: [], selectedId: 'demo-1', view: 'collection', query: '' },
     prefs,
     ui: { view: 'performance', bottomTab: 'library', settingsSection: 'controller', gridDeck: null, zoomSec: 4, toast: null },
   };

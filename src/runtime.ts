@@ -12,7 +12,10 @@ import type { EngineAction } from './engine/actions.ts';
 import { DEFAULT_PREFS, initialState } from './engine/initialState.ts';
 import { reduce } from './engine/reducer.ts';
 import type { EngineState } from './engine/types.ts';
-import { loadSaved, mergePrefs, save, savedLocalTracks } from './lib/persist.ts';
+import { hasWaveform } from './engine/waveform.ts';
+import { loadSaved, mergePrefs, save, savedFolders, savedLocalTracks, snapshot, type Saved } from './lib/persist.ts';
+import { IDLE_PROGRESS, LibraryController, type ImportProgress } from './library/controller.ts';
+import { libraryHost } from './library/host.ts';
 import { createStore } from './lib/store.ts';
 import { Bindings } from './midi/bindings.ts';
 import { OUT } from './midi/flx2Map.ts';
@@ -21,10 +24,25 @@ import { BLINK_MS, computeLeds, diffLeds, ledKey, type LedFrame } from './midi/l
 import type { DeckIndex } from './midi/types.ts';
 import { VirtualFlx2 } from './midi/virtualFlx2.ts';
 
-const saved = loadSaved();
+/**
+ * The saved library: the desktop app keeps it in a file (electron/library.cjs); the browser build
+ * in localStorage. A desktop app without a file yet takes over what localStorage holds, once.
+ */
+const libHost = libraryHost();
+function loadLibrary(): Saved {
+  if (!libHost) return loadSaved();
+  const fromFile = libHost.load();
+  if (fromFile) return fromFile;
+  const legacy = loadSaved();
+  if (legacy.prefs || legacy.tracks || legacy.local) void libHost.save(legacy);
+  return legacy;
+}
+const saved = loadLibrary();
 const local = savedLocalTracks(saved);
+const folders = savedFolders(saved);
 let boot = initialState(mergePrefs(DEFAULT_PREFS, saved.prefs));
 if (local.length) boot = reduce(boot, { type: 'library/add', tracks: local });
+if (folders.length) boot = reduce(boot, { type: 'library/folders', folders });
 if (saved.tracks) boot = reduce(boot, { type: 'library/hydrate', edits: saved.tracks });
 export const store = createStore<EngineState, EngineAction>(boot, reduce);
 export const midi = new Flx2Midi();
@@ -37,6 +55,8 @@ interface HostState {
   probe: AudioProbe;
   /** The native engine. */
   audio: AudioStatus;
+  /** Folder import and analysis, for the library's progress strip. */
+  library: ImportProgress;
 }
 const hostAudio = audioHost();
 export const host = createStore<HostState, Partial<HostState>>(
@@ -44,9 +64,12 @@ export const host = createStore<HostState, Partial<HostState>>(
     isElectron: !!(globalThis as { rekordfoxHost?: { isElectron?: boolean } }).rekordfoxHost?.isElectron,
     probe: { state: 'unknown' },
     audio: hostAudio ? { state: 'idle' } : { state: 'unavailable', reason: 'Audio needs the desktop app (start-desktop.bat): the browser build has no audio engine.' },
+    library: IDLE_PROGRESS,
   },
   (s, patch) => ({ ...s, ...patch }),
 );
+/** Folders, tags, analysis and waveforms — the desktop app only. */
+export const library: LibraryController | null = libHost ? new LibraryController(store, libHost, (p) => host.dispatch({ library: p })) : null;
 /** The audio bridge, when the desktop shell exposes the engine. */
 export const audio: EngineBridge | null = hostAudio ? new EngineBridge(store, hostAudio, (status) => host.dispatch({ audio: status })) : null;
 
@@ -118,21 +141,24 @@ export function startRuntime(): void {
   requestAnimationFrame(frame);
   setInterval(() => leds.tick(performance.now()), 30);
 
-  // Persist prefs and library edits (debounced; only when those slices change).
+  // Persist prefs, folders and library edits (debounced; only when those slices change).
+  const persist = (s: EngineState) => (libHost ? void libHost.save(snapshot(s)).catch(() => undefined) : save(s));
   let lastPrefs = store.getState().prefs;
   let lastTracks = store.getState().library.tracks;
+  let lastFolders = store.getState().library.folders;
   let timer: ReturnType<typeof setTimeout> | null = null;
   store.subscribe(() => {
     const s = store.getState();
-    if (s.prefs === lastPrefs && s.library.tracks === lastTracks) return;
+    if (s.prefs === lastPrefs && s.library.tracks === lastTracks && s.library.folders === lastFolders) return;
     lastPrefs = s.prefs;
     lastTracks = s.library.tracks;
+    lastFolders = s.library.folders;
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => save(store.getState()), 400);
+    timer = setTimeout(() => persist(store.getState()), 400);
   });
 
   window.addEventListener('pagehide', () => {
-    save(store.getState());
+    persist(store.getState());
     leds.blackout();
     midi.dispose();
     void audio?.stop();
@@ -143,6 +169,7 @@ export function startRuntime(): void {
   navigator.mediaDevices?.addEventListener?.('devicechange', refreshProbe);
 
   void audio?.start(store.getState().prefs.audioDevice);
+  library?.start();
   void autoConnect();
 }
 
@@ -183,4 +210,4 @@ export function setVirtualAttached(on: boolean): void {
 }
 
 /** For debugging from DevTools: window.rekordfox.store.getState() */
-(globalThis as Record<string, unknown>).rekordfox = { store, midi, bindings, virtualUnit, audio, meters };
+(globalThis as Record<string, unknown>).rekordfox = { store, midi, bindings, virtualUnit, audio, meters, library, hasWaveform };

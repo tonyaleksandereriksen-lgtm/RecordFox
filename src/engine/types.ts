@@ -173,7 +173,8 @@ export interface Prefs {
   /** Block overview clicks on a playing deck unless Shift is held. */
   needleLock: boolean;
   faderStart: FaderStartMode;
-  /** Electron only: ask the unit for its knob/fader positions at connect (optional SysEx). */
+  /** Electron only: ask the unit for its knob/fader positions at connect (optional SysEx).
+   *  Off by default: checked on the FLX2 on 2026-09-13, the unit does not answer F0 00 20 7F 03 01 F7. */
   statusDump: boolean;
   /** Output device name for the native engine; null = the DDJ-FLX2 if present, else the default output. */
   audioDevice: string | null;

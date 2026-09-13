@@ -7,7 +7,7 @@ export const DEFAULT_PREFS: Prefs = {
   defaultQuantize: true,
   needleLock: true,
   faderStart: 'smart',
-  statusDump: true,
+  statusDump: false,
   audioDevice: null,
 };
 

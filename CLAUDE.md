@@ -112,4 +112,4 @@ Pad FX, slip, Smart Fader in the engine), then Audius.
 ## Open items to verify on hardware
 SYNC long-press vs SHIFT+SYNC (`2A`/`5C`), SHIFT + CH CUE (`08`), ch-7 notes `96 00/01/09` (Smart CFX / Smart Fader),
 MASTER LEVEL and HEADPHONES LEVEL CC numbers (bound via MIDI Learn), pad channels 8–11 on the actual unit,
-jog resolution (720 ticks/rev assumed), the optional status-dump SysEx.
+jog resolution (720 ticks/rev assumed). Settled: the status-dump SysEx gets no answer from the unit (2026-09-13).

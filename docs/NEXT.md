@@ -196,7 +196,9 @@ Work through the MIDI monitor with every control on the FLX2 and settle the rows
 - SHIFT + CH CUE (`08`); ch-7 notes `96 00 / 01 / 09` (Smart CFX, Smart Fader).
 - MASTER LEVEL and HEADPHONES LEVEL CC numbers — bind them with Learn, then hard-code what you learn.
 - Pad channels 8–11 on the real unit; jog resolution (720 ticks/rev is an assumption).
-- The optional status-dump SysEx `F0 00 20 7F 03 01 F7`: does the unit answer?
+- ~~The optional status-dump SysEx `F0 00 20 7F 03 01 F7`: does the unit answer?~~ **No** (checked
+  2026-09-13 with the unit connected and SysEx allowed: the request went out, nothing came back in four
+  seconds, and the unit sends nothing unsolicited). The `statusDump` preference now defaults to off.
 
 **Done when:** a full pass over every control produces no `unmapped` rows in the monitor, each row's
 `confidence` is updated, `npm run docs:midi` is regenerated, and the "Open items to verify on hardware"

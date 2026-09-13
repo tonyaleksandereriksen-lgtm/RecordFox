@@ -306,3 +306,166 @@ impl Task for ProbeTask {
 pub fn probe_file(path: String) -> Result<AsyncTask<ProbeTask>> {
     Ok(AsyncTask::new(ProbeTask { path: c_path(&path)? }))
 }
+
+// ---------------------------------------------------------------------------------------------
+// Library: tags and analysis. Both run on the thread pool; the analyser holds one result at a
+// time in C, so runs are serialised behind a lock.
+
+use std::sync::Mutex;
+
+static ANALYSIS_LOCK: Mutex<()> = Mutex::new(());
+
+#[napi(object)]
+pub struct TagInfo {
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub album_artist: Option<String>,
+    pub genre: Option<String>,
+    pub year: Option<u32>,
+    pub track_number: Option<u32>,
+    pub comment: Option<String>,
+    /// From the stream properties, 0 when the container did not say.
+    pub duration_seconds: f64,
+    pub sample_rate: u32,
+    pub channels: u32,
+    pub bitrate_kbps: u32,
+    pub has_artwork: bool,
+}
+
+pub struct TagsTask {
+    path: String,
+}
+
+impl Task for TagsTask {
+    type Output = TagInfo;
+    type JsValue = TagInfo;
+
+    fn compute(&mut self) -> Result<TagInfo> {
+        use lofty::prelude::*;
+        let tagged = lofty::read_from_path(&self.path).map_err(|e| fail(format!("could not read the tags: {e}")))?;
+        let props = tagged.properties();
+        let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
+        let text = |f: &dyn Fn(&lofty::tag::Tag) -> Option<String>| tag.and_then(f).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        Ok(TagInfo {
+            title: text(&|t| t.title().map(|s| s.into_owned())),
+            artist: text(&|t| t.artist().map(|s| s.into_owned())),
+            album: text(&|t| t.album().map(|s| s.into_owned())),
+            album_artist: text(&|t| t.get_string(ItemKey::AlbumArtist).map(|s| s.to_string())),
+            genre: text(&|t| t.genre().map(|s| s.into_owned())),
+            year: tag.and_then(|t| t.date().map(|d| u32::from(d.year))).or_else(|| tag.and_then(|t| t.get_string(ItemKey::Year).and_then(|y| y.trim().get(0..4).and_then(|s| s.parse().ok())))),
+            track_number: tag.and_then(|t| t.track()),
+            comment: text(&|t| t.comment().map(|s| s.into_owned())),
+            duration_seconds: props.duration().as_secs_f64(),
+            sample_rate: props.sample_rate().unwrap_or(0),
+            channels: u32::from(props.channels().unwrap_or(0)),
+            bitrate_kbps: props.audio_bitrate().unwrap_or(0),
+            has_artwork: tag.map(|t| !t.pictures().is_empty()).unwrap_or(false),
+        })
+    }
+
+    fn resolve(&mut self, _env: Env, output: TagInfo) -> Result<TagInfo> {
+        Ok(output)
+    }
+}
+
+/// Reads a file's tags and stream properties (id3 / vorbis / flac / riff) without decoding audio.
+#[napi]
+pub fn read_tags(path: String) -> AsyncTask<TagsTask> {
+    AsyncTask::new(TagsTask { path })
+}
+
+pub struct AnalysisOut {
+    duration_seconds: f64,
+    source_rate: i32,
+    source_channels: i32,
+    bpm: f64,
+    bpm_confidence: f64,
+    first_beat_seconds: f64,
+    key: String,
+    key_name: String,
+    key_fit: f64,
+    key_margin: f64,
+    bins: i32,
+    wave: Vec<u8>,
+}
+
+/// BPM, downbeat, key and the 3-band waveform (`wave`: low, mid, high bytes per bin, 100 bins/s).
+#[napi(object)]
+pub struct AnalysisInfo {
+    pub duration_seconds: f64,
+    pub source_rate: i32,
+    pub source_channels: i32,
+    pub bpm: f64,
+    pub bpm_confidence: f64,
+    pub first_beat_seconds: f64,
+    /// Camelot code, e.g. "8A".
+    pub key: String,
+    pub key_name: String,
+    pub key_fit: f64,
+    /// How far ahead of the runner-up the key was; small means ambiguous (relative major/minor).
+    pub key_margin: f64,
+    pub bins: i32,
+    pub wave: Buffer,
+}
+
+pub struct AnalyzeTask {
+    path: CString,
+}
+
+impl Task for AnalyzeTask {
+    type Output = AnalysisOut;
+    type JsValue = AnalysisInfo;
+
+    fn compute(&mut self) -> Result<AnalysisOut> {
+        let _guard = ANALYSIS_LOCK.lock().map_err(|_| fail("the analyser lock is poisoned".into()))?;
+        if unsafe { rfx_analysis_run(self.path.as_ptr()) } != 0 {
+            let msg = cstr(unsafe { rfx_analysis_error() });
+            unsafe { rfx_analysis_release() };
+            return Err(fail(format!("could not analyse the file: {msg}")));
+        }
+        let bins = unsafe { rfx_analysis_int(5) }.max(0);
+        let mut wave = vec![0u8; bins as usize * 3];
+        let written = if bins > 0 { unsafe { rfx_analysis_wave(wave.as_mut_ptr(), wave.len() as i32) } } else { 0 };
+        wave.truncate(written.max(0) as usize * 3);
+        let out = AnalysisOut {
+            duration_seconds: unsafe { rfx_analysis_double(0) },
+            source_rate: unsafe { rfx_analysis_int(1) },
+            source_channels: unsafe { rfx_analysis_int(2) },
+            bpm: unsafe { rfx_analysis_double(1) },
+            bpm_confidence: unsafe { rfx_analysis_double(2) },
+            first_beat_seconds: unsafe { rfx_analysis_double(3) },
+            key: cstr(unsafe { rfx_analysis_text(0) }),
+            key_name: cstr(unsafe { rfx_analysis_text(1) }),
+            key_fit: unsafe { rfx_analysis_double(4) },
+            key_margin: unsafe { rfx_analysis_double(5) },
+            bins: written.max(0),
+            wave,
+        };
+        unsafe { rfx_analysis_release() };
+        Ok(out)
+    }
+
+    fn resolve(&mut self, _env: Env, o: AnalysisOut) -> Result<AnalysisInfo> {
+        Ok(AnalysisInfo {
+            duration_seconds: o.duration_seconds,
+            source_rate: o.source_rate,
+            source_channels: o.source_channels,
+            bpm: o.bpm,
+            bpm_confidence: o.bpm_confidence,
+            first_beat_seconds: o.first_beat_seconds,
+            key: o.key,
+            key_name: o.key_name,
+            key_fit: o.key_fit,
+            key_margin: o.key_margin,
+            bins: o.bins,
+            wave: Buffer::from(o.wave),
+        })
+    }
+}
+
+/// Analyses a file on the thread pool (one at a time): BPM, downbeat, key, 3-band waveform.
+#[napi]
+pub fn analyze(path: String) -> Result<AsyncTask<AnalyzeTask>> {
+    Ok(AsyncTask::new(AnalyzeTask { path: c_path(&path)? }))
+}

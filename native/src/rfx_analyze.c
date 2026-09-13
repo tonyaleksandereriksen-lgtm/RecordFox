@@ -29,6 +29,53 @@
 #define BPM_MIN 70.0
 #define BPM_MAX 190.0
 
+/* Tempo prior, used only to settle octave ties. A kick on every beat scores the beat and the
+ * two-beat lag alike in the comb (every multiple of the beat lines up for both), so which one wins
+ * is left to the bar accents and to noise — and 150 BPM hardstyle comes back as 75. DJ music sits
+ * mostly between 100 and 160: a log-normal centred on 128 with a 0.6-octave width prefers 150 to
+ * 75 by 2:1 and 174 to 87, while leaving 85 against 170 to the comb (the half-beat lag of a real
+ * 85 BPM track scores far too low to be lifted by the 1.3:1 the prior gives it). */
+#define TEMPO_PRIOR_CENTRE 128.0
+#define TEMPO_PRIOR_OCTAVES 0.6
+
+static double tempo_prior(double bpm)
+{
+    double x = (log(bpm / TEMPO_PRIOR_CENTRE) / log(2.0)) / TEMPO_PRIOR_OCTAVES;
+    return exp(-0.5 * x * x);
+}
+
+/* Normalised autocorrelation of the onset envelope at one integer lag. */
+static double acf_at(const double* norm, unsigned int nFrames, unsigned int lag)
+{
+    unsigned int n = (lag < nFrames) ? nFrames - lag : 0;
+    unsigned int i;
+    double acc = 0.0;
+    if (n == 0) return 0.0;
+    for (i = 0; i < n; i += 1) acc += norm[i] * norm[i + lag];
+    return acc / (double)n;
+}
+
+/* The comb score at a fractional lag: each harmonic is read between its two neighbouring integer
+ * lags. The lag grid is coarse (11.6 ms), so a period of 34.45 frames read at 34 loses most of its
+ * harmonics — that is how a fast tempo loses to its half in the integer search. */
+static double comb_at(const double* norm, unsigned int nFrames, double lag)
+{
+    static const double weight[4] = { 1.0, 0.6, 0.35, 0.2 };
+    double score = 0.0;
+    int m;
+    for (m = 1; m <= 4; m += 1) {
+        double l = lag * (double)m;
+        unsigned int lo = (unsigned int)floor(l);
+        double f = l - (double)lo;
+        double a, b;
+        if (lo + 1 >= nFrames) break;
+        a = acf_at(norm, nFrames, lo);
+        b = acf_at(norm, nFrames, lo + 1);
+        score += weight[m - 1] * ((1.0 - f) * a + f * b);
+    }
+    return score;
+}
+
 #ifndef AN_PI
 #define AN_PI 3.14159265358979323846
 #endif
@@ -370,6 +417,7 @@ int rfx_analyze_samples(const float* mono, unsigned int frames, unsigned int rat
         double best = -1e30, bestLag = 0.0, scoreSum = 0.0;
         unsigned int lag, count = 0;
         double* norm = (double*)calloc(nFrames, sizeof(double));
+        double* scores = NULL;
         if (norm == NULL) {
             fail(out, "out of memory during analysis");
             goto done;
@@ -382,6 +430,12 @@ int rfx_analyze_samples(const float* mono, unsigned int frames, unsigned int rat
         for (f = 0; f < nFrames; f += 1) norm[f] = (onset[f] - mean) / sd;
 
         if (lagMax >= nFrames) lagMax = nFrames > 2 ? nFrames - 2 : 2;
+        scores = (double*)calloc(lagMax + 1, sizeof(double));
+        if (scores == NULL) {
+            free(norm);
+            fail(out, "out of memory during analysis");
+            goto done;
+        }
         for (lag = lagMin; lag <= lagMax; lag += 1) {
             /* Sum the autocorrelation at this lag and its first harmonics: a true beat period also
              * lines up at 2 and 4 beats, which keeps subdivisions from winning. */
@@ -397,6 +451,7 @@ int rfx_analyze_samples(const float* mono, unsigned int frames, unsigned int rat
                 for (i = 0; i < n; i += 1) acc += norm[i] * norm[i + l];
                 score += weight[m - 1] * (acc / (double)n);
             }
+            scores[lag] = score;
             scoreSum += score;
             count += 1;
             if (score > best) {
@@ -404,6 +459,8 @@ int rfx_analyze_samples(const float* mono, unsigned int frames, unsigned int rat
                 bestLag = (double)lag;
             }
         }
+
+        free(scores);
 
         /* Parabolic refinement around the winning lag, for sub-BPM precision. */
         if (bestLag > (double)lagMin && bestLag < (double)lagMax) {
@@ -431,6 +488,30 @@ int rfx_analyze_samples(const float* mono, unsigned int frames, unsigned int rat
             free(norm);
             fail(out, "no tempo found");
             goto done;
+        }
+
+        /* Octave tie-break: the refined winner against its half and its double, each scored at its
+         * exact fractional lag and weighted by the tempo prior. Only positive scores compete, so the
+         * prior can lower a candidate but never lift a poor one. */
+        {
+            double cand[3];
+            double bestWeighted = -1e30, chosen = bestLag;
+            int c;
+            cand[0] = bestLag;
+            cand[1] = bestLag * 0.5;
+            cand[2] = bestLag * 2.0;
+            for (c = 0; c < 3; c += 1) {
+                double l = cand[c], s, w;
+                if (l < (double)lagMin || l > (double)lagMax) continue;
+                s = comb_at(norm, nFrames, l);
+                if (s <= 0.0) continue;
+                w = s * tempo_prior(60.0 * fps / l);
+                if (w > bestWeighted) {
+                    bestWeighted = w;
+                    chosen = l;
+                }
+            }
+            bestLag = chosen;
         }
 
         out->bpm = 60.0 * fps / bestLag;

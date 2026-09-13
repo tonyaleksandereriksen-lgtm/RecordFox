@@ -139,7 +139,25 @@ int rfx_analyze_test_main(void)
     if (buf != NULL) {
         check(rfx_analyze_samples(buf, frames, RATE, &a) == 0, "analyses a 174 BPM fixture");
         printf("     174 BPM -> %.2f BPM\n", a.bpm);
-        check(fabs(a.bpm - 174.0) < 0.8 || fabs(a.bpm - 87.0) < 0.5, "reports 174 or its half, not something unrelated");
+        check(fabs(a.bpm - 174.0) < 0.8, "reports 174, not its half");
+        rfx_analysis_free(&a);
+        free(buf);
+    }
+
+    /* Hardstyle-style: a kick on every beat with a hard accent every two beats, so the two-beat
+       lag out-scores the beat in the comb. The tempo prior has to bring it back to 150, not 75. */
+    buf = make_beat(150.0, 0.1, 24.0, &frames);
+    if (buf != NULL) {
+        int k;
+        double beat = 60.0 / 150.0;
+        for (k = 0; k < (int)(24.0 / beat); k += 2) {
+            double t = 0.1 + (double)k * beat;
+            if (t + 0.2 > 24.0) break;
+            add_tone(buf, frames, t, 0.12, 55.0, 0.9, 0.05);   /* extra weight on every other kick */
+        }
+        check(rfx_analyze_samples(buf, frames, RATE, &a) == 0, "analyses a 150 BPM fixture accented every two beats");
+        printf("     150 BPM, two-beat accents -> %.2f BPM\n", a.bpm);
+        check(fabs(a.bpm - 150.0) < 0.8, "the tempo prior keeps 150 over its half");
         rfx_analysis_free(&a);
         free(buf);
     }
